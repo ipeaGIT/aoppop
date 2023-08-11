@@ -1,0 +1,3 @@
+name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
+census_tracts|stem|6e15e02e6a1b4310|9cc753fc826da386|18cc2656dc4f9f23|1344807390||t19580.8302893519s|21be34457cc5badb|306813721|rds|local|vector|||60.02||
+download_census_tracts|function|813785e47484653b|||||||||||||||
