@@ -6,6 +6,8 @@ download_census_tracts <- function() {
     showProgress = getOption("TARGETS_SHOW_PROGRESS")
   )
   
+  census_tracts <- sf::st_make_valid(census_tracts)
+  
   return(census_tracts)
 }
 
@@ -17,6 +19,44 @@ download_statistical_grid <- function() {
   )
   
   return(statistical_grid)
+}
+
+download_urban_concentrations <- function() {
+  urban_concentrations <- geobr::read_urban_concentrations(simplified = FALSE)
+  urban_concentrations <- sf::st_make_valid(urban_concentrations)
+  urban_concentrations <- dplyr::summarize(
+    urban_concentrations,
+    geom = sf::st_union(geom),
+    .by = c(code_urban_concentration, name_urban_concentration)
+  )
+  
+  return(urban_concentrations)
+}
+
+# census_tracts <- tar_read(census_tracts)
+# urban_concentrations <- tar_read(urban_concentrations)
+subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
+  intersections <- sf::st_intersects(census_tracts, urban_concentrations)
+  does_intersect <- lengths(intersections) > 0
+  
+  filtered_tracts <- census_tracts[does_intersect, ]
+  
+  return(filtered_tracts)
+}
+
+# census_statistical_grid <- tar_read(census_statistical_grid)
+# urban_concentrations <- tar_read(urban_concentrations)
+subset_urban_conc_grid <- function(census_statistical_grid,
+                                   urban_concentrations) {
+  intersections <- sf::st_intersects(
+    census_statistical_grid,
+    urban_concentrations
+  )
+  does_intersect <- lengths(intersections) > 0
+  
+  filtered_grid <- census_statistical_grid[does_intersect, ]
+
+  return(filtered_grid)
 }
 
 # census_data_path <- tar_read(census_data_path)
@@ -181,4 +221,26 @@ process_census_data <- function(subset_census_data, census_income_data) {
   census_data[, renda_per_capita := renda_total / moradores_total]
   
   return(census_data[])
+}
+
+# urban_concentration_tracts <- tar_read(urban_concentration_tracts)
+# processed_census_data <- tar_read(processed_census_data)
+merge_census_tracts_data <- function(urban_concentration_tracts,
+                                     processed_census_data) {
+  data.table::setDT(urban_concentration_tracts)
+  
+  tracts_with_data <- merge(
+    urban_concentration_tracts,
+    processed_census_data,
+    by.x = "code_tract",
+    by.y = "cod_setor"
+  )
+  
+  return(tracts_with_data)
+  
+  # the tracts below do not appear in the census data... why?
+  
+  tracts_without_data <- urban_concentration_tracts[
+    ! code_tract %in% processed_census_data$cod_setor
+  ]
 }

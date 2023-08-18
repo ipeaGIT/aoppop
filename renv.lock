@@ -242,6 +242,29 @@
       ],
       "Hash": "b18a9cf3c003977b0cc49d5e76ebe48d"
     },
+    "dplyr": {
+      "Package": "dplyr",
+      "Version": "1.1.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "R6",
+        "cli",
+        "generics",
+        "glue",
+        "lifecycle",
+        "magrittr",
+        "methods",
+        "pillar",
+        "rlang",
+        "tibble",
+        "tidyselect",
+        "utils",
+        "vctrs"
+      ],
+      "Hash": "dea6970ff715ca541c387de363ff405e"
+    },
     "e1071": {
       "Package": "e1071",
       "Version": "1.7-13",
@@ -280,6 +303,17 @@
         "utils"
       ],
       "Hash": "1d9e7ad3c8312a192dea7d3db0274fde"
+    },
+    "generics": {
+      "Package": "generics",
+      "Version": "0.1.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "methods"
+      ],
+      "Hash": "15e9634c0fcd294799e9b2e929ed1b86"
     },
     "geobr": {
       "Package": "geobr",

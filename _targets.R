@@ -32,5 +32,18 @@ list(
     process_census_data(subset_census_data, census_income_data)
   ),
   tar_target(census_tracts, download_census_tracts()),
-  tar_target(census_statistical_grid, download_statistical_grid())
+  tar_target(census_statistical_grid, download_statistical_grid()),
+  tar_target(urban_concentrations, download_urban_concentrations()),
+  tar_target(
+    urban_concentration_tracts,
+    subset_urban_conc_tracts(census_tracts, urban_concentrations)
+  ),
+  tar_target(
+    urban_concentration_grid,
+    subset_urban_conc_grid(census_statistical_grid, urban_concentrations)
+  ),
+  tar_target(
+    tracts_with_data,
+    merge_census_tracts_data(urban_concentration_tracts, processed_census_data)
+  )
 )
