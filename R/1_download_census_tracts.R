@@ -237,10 +237,4 @@ merge_census_tracts_data <- function(urban_concentration_tracts,
   )
   
   return(tracts_with_data)
-  
-  # the tracts below do not appear in the census data... why?
-  
-  tracts_without_data <- urban_concentration_tracts[
-    ! code_tract %in% processed_census_data$cod_setor
-  ]
 }
