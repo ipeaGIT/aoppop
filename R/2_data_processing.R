@@ -118,7 +118,7 @@ process_census_data <- function(subset_census_data, census_income_data) {
   )
   data.table::setnames(census_data, old = cols_to_keep, new = new_colnames)
   
-  # correct population per age and race group by the total population count
+  # correct population per age and race group by the total population count.
   # the total population count (moradores_total) diverge from the sum of
   # population per age and race group
   # so we assume the total population count is correct and correct the
@@ -144,7 +144,7 @@ process_census_data <- function(subset_census_data, census_income_data) {
   
   census_data[
     ,
-    race_total :=eval(parse(text = paste(race_cols, collapse = "+")))
+    race_total := eval(parse(text = paste(race_cols, collapse = "+")))
   ]
   census_data[
     ,

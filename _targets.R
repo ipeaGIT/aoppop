@@ -39,12 +39,16 @@ list(
   tar_target(census_statistical_grid, download_statistical_grid()),
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(
-    urban_concentration_stat_grid,
-    subset_urban_conc_grid(census_statistical_grid, urban_concentrations)
-  ),
-  tar_target(
     urban_concentration_tracts,
     subset_urban_conc_tracts(census_tracts, urban_concentrations)
+  ),
+  tar_target(
+    urban_concentration_stat_grid,
+    subset_urban_conc_grid(
+      census_statistical_grid,
+      urban_concentrations,
+      urban_concentration_tracts
+    )
   ),
   tar_target(
     urban_conc_hex_grid,

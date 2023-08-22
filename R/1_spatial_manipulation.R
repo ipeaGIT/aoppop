@@ -38,21 +38,6 @@ download_urban_concentrations <- function() {
   return(urban_concentrations)
 }
 
-# census_statistical_grid <- tar_read(census_statistical_grid)
-# urban_concentrations <- tar_read(urban_concentrations)
-subset_urban_conc_grid <- function(census_statistical_grid,
-                                   urban_concentrations) {
-  intersections <- sf::st_intersects(
-    census_statistical_grid,
-    sf::st_buffer(urban_concentrations, 1000)
-  )
-  does_intersect <- lengths(intersections) > 0
-  
-  filtered_grid <- census_statistical_grid[does_intersect, ]
-  
-  return(filtered_grid)
-}
-
 # census_tracts <- tar_read(census_tracts)
 # urban_concentrations <- tar_read(urban_concentrations)
 subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
@@ -66,18 +51,63 @@ subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
   does_intersect <- lengths(intersections) > 0
   
   filtered_tracts <- census_tracts[does_intersect, ]
-  filtered_tracts <- sf::st_make_valid(filtered_tracts)
-  filtered_tracts <- sf::st_buffer(filtered_tracts, 0)
+  # filtered_tracts <- sf::st_make_valid(filtered_tracts)
+  # filtered_tracts <- sf::st_buffer(filtered_tracts, 0)
   
-  # some tracts overlap, which create problems when later reaggregating census
-  # data to hex grid (population count would be overcounted)
-  # FIXME: worry about this warning?
-  #   - although coordinates are longitude/latitude, st_difference assumes that
-  #     they are planar
-  
-  filtered_tracts <- sf::st_difference(filtered_tracts)
+  # # some tracts overlap, which create problems when later reaggregating census
+  # # data to hex grid (population count would be overcounted)
+  # # FIXME: worry about this warning?
+  # #   - although coordinates are longitude/latitude, st_difference assumes that
+  # #     they are planar
+  # 
+  # filtered_tracts <- sf::st_difference(filtered_tracts)
   
   return(filtered_tracts)
+}
+
+# stat_grid <- tar_read(census_statistical_grid)
+# urban_concentrations <- tar_read(urban_concentrations)
+# urban_concentration_tracts <- tar_read(urban_concentration_tracts)
+subset_urban_conc_grid <- function(stat_grid,
+                                   urban_concentrations,
+                                   urban_concentration_tracts) {
+  # we can remove grid cells that don't have any population on them, because
+  # they will not affect the aggregation processes from the census tracts to the
+  # statistical grid and from the grid to the hexagons
+  
+  stat_grid <- stat_grid[stat_grid$POP > 0, ]
+  
+  # creating a small buffer around the urban concentrations helps us make sure
+  # that our statistical grid will fully cover the hexagon grid that we will use
+  # (the hexagons can extend beyond the urban concentrations' limits, due to
+  # their shape)
+  
+  intersections <- sf::st_intersects(
+    stat_grid,
+    sf::st_buffer(urban_concentrations, 1000)
+  )
+  does_intersect <- lengths(intersections) > 0
+  
+  filtered_grid <- stat_grid[does_intersect, ]
+  
+  # finally, we have to intersect the statistical grid with the census tracts
+  # that cover the urban concentrations, otherwise we would not properly count
+  # the total population in each intersection between grid cells and tracts when
+  # aggregating census data to the statistical grid
+  # (unifying the tracts before intersecting speeds up the process) 
+  
+  unified_tracts <- parallel_union(
+    urban_concentration_tracts,
+    n_cores = min(8, getOption("TARGETS_N_CORES"))
+  )
+  
+  filtered_grid <- parallel_intersection(
+    filtered_grid,
+    unified_tracts,
+    n_cores = min(10, getOption("TARGETS_N_CORES"))
+  )
+  
+  return(filtered_grid)
 }
 
 # urban_concentrations <- tar_read(urban_concentrations)
@@ -127,4 +157,78 @@ create_hex_grid <- function(urban_concentrations, res) {
   }
   
   return(urban_conc_grid)
+}
+
+parallel_union <- function(object, n_cores) {
+  indices_cuts <- cut(
+    1:nrow(object),
+    breaks = n_cores
+  )
+  batch_indices <- split(1:nrow(object), indices_cuts)
+  
+  future::plan(future::multisession, workers = n_cores)
+  
+  unified_object_list <- furrr::future_map(
+    batch_indices,
+    function(is) {
+      x <- sf::st_union(object[is, ])
+      x <- sf::st_make_valid(x)
+      x
+    },
+    .options = furrr::furrr_options(seed = TRUE, globals = "object"),
+    .progress = getOption("TARGETS_SHOW_PROGRESS")
+  )
+  
+  future::plan(future::sequential)
+  
+  unified_object <- Reduce(
+    function(obj1, obj2) {
+      x <- sf::st_union(obj1, obj2)
+      x <- sf::st_make_valid(x)
+    },
+    unified_object_list
+  )
+  
+  return(unified_object)
+}
+
+parallel_intersection <- function(x, y, n_cores) {
+  indices_cuts <- cut(1:nrow(x), breaks = n_cores)
+  batch_indices <- split(1:nrow(x), indices_cuts)
+  
+  future::plan(future::multisession, workers = n_cores)
+  
+  intersections_list <- furrr::future_map(
+    batch_indices,
+    function(is) sf::st_intersection(x[is, ], y),
+    .options = furrr::furrr_options(seed = TRUE, globals = c("x", "y")),
+    .progress = getOption("TARGETS_SHOW_PROGRESS")
+  )
+  
+  future::plan(future::sequential)
+  
+  # the class of the geom column of each list element may be different,
+  # depending whether the intersection result in polygon or multipolygon
+  # objects. so we check if they are different, and, if so, we cast it to the
+  # same class
+  
+  geom_classes <- vapply(
+    intersections_list,
+    FUN.VALUE = character(1),
+    FUN = function(obj) setdiff(class(obj$geom), "sfc")
+  )
+  
+  if (!length(unique(geom_classes)) == 1) {
+    non_multi_indices <- geom_classes == "sfc_GEOMETRY"
+    
+    intersections_list[non_multi_indices] <- lapply(
+      intersections_list[non_multi_indices],
+      function(obj) sf::st_cast(obj, to = "MULTIPOLYGON")
+    )
+  }
+  
+  intersected_obj <- data.table::rbindlist(intersections_list)
+  intersected_obj <- sf::st_sf(intersected_obj)
+  
+  return(intersected_obj)
 }
