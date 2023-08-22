@@ -51,6 +51,7 @@ subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
   does_intersect <- lengths(intersections) > 0
   
   filtered_tracts <- census_tracts[does_intersect, ]
+  # FIXME: figure out why the st_difference() call results in an error here
   # filtered_tracts <- sf::st_make_valid(filtered_tracts)
   # filtered_tracts <- sf::st_buffer(filtered_tracts, 0)
   
@@ -160,11 +161,12 @@ create_hex_grid <- function(urban_concentrations, res) {
 }
 
 parallel_union <- function(object, n_cores) {
-  indices_cuts <- cut(
-    1:nrow(object),
-    breaks = n_cores
-  )
-  batch_indices <- split(1:nrow(object), indices_cuts)
+  if (n_cores == 1) {
+    batch_indices = list(1:nrow(object))
+  } else {
+    indices_cuts <- cut(1:nrow(object), breaks = n_cores)
+    batch_indices <- split(1:nrow(object), indices_cuts)
+  }
   
   future::plan(future::multisession, workers = n_cores)
   
@@ -193,8 +195,12 @@ parallel_union <- function(object, n_cores) {
 }
 
 parallel_intersection <- function(x, y, n_cores) {
-  indices_cuts <- cut(1:nrow(x), breaks = n_cores)
-  batch_indices <- split(1:nrow(x), indices_cuts)
+  if (n_cores == 1) {
+    batch_indices = list(1:nrow(x))
+  } else {
+    indices_cuts <- cut(1:nrow(x), breaks = n_cores)
+    batch_indices <- split(1:nrow(x), indices_cuts)
+  }
   
   future::plan(future::multisession, workers = n_cores)
   
@@ -212,23 +218,7 @@ parallel_intersection <- function(x, y, n_cores) {
   # objects. so we check if they are different, and, if so, we cast it to the
   # same class
   
-  geom_classes <- vapply(
-    intersections_list,
-    FUN.VALUE = character(1),
-    FUN = function(obj) setdiff(class(obj$geom), "sfc")
-  )
-  
-  if (!length(unique(geom_classes)) == 1) {
-    non_multi_indices <- geom_classes == "sfc_GEOMETRY"
-    
-    intersections_list[non_multi_indices] <- lapply(
-      intersections_list[non_multi_indices],
-      function(obj) sf::st_cast(obj, to = "MULTIPOLYGON")
-    )
-  }
-  
-  intersected_obj <- data.table::rbindlist(intersections_list)
-  intersected_obj <- sf::st_sf(intersected_obj)
+  intersected_obj <- do.call(rbind, intersections_list)
   
   return(intersected_obj)
 }

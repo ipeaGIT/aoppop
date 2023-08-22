@@ -118,12 +118,22 @@ process_census_data <- function(subset_census_data, census_income_data) {
   )
   data.table::setnames(census_data, old = cols_to_keep, new = new_colnames)
   
-  # correct population per age and race group by the total population count.
-  # the total population count (moradores_total) diverge from the sum of
-  # population per age and race group
-  # so we assume the total population count is correct and correct the
-  # population count per age and race group while keeping the same proportions
-  # per group
+  # total population count will be derived from statistical grid data, not from
+  # census data. from the census data, we want the proportions of each
+  # income/age/racial groups as a share of the total population.
+  #
+  # however, the total population count living in permanent households
+  # (moradores_total) diverges from the sum of population per age and race
+  # group. that's not a problem for age and racial groups, because it doesn't
+  # affect the proportions, but it is for the income groups - which population
+  # count to use? in this case, we use moradores_total to calculate the
+  # proportion of each income group.
+  #
+  # FIXME: there are tracts with 0 moredores_total and non negligibles
+  # age_total and race_total. investigate the difference between these variables
+  # again.
+
+  age_prop_cols <- paste0(age_cols, "_prop")
   
   census_data[
     ,
@@ -131,33 +141,57 @@ process_census_data <- function(subset_census_data, census_income_data) {
   ]
   census_data[
     ,
-    (age_cols) := lapply(.SD, function(x) x / age_total),
+    (age_prop_cols) := lapply(.SD, function(x) x / age_total),
     .SDcols = age_cols
   ]
   census_data[
     ,
-    (age_cols) := lapply(.SD, function(x) round(x * moradores_total)),
-    .SDcols = age_cols
+    (age_prop_cols) := lapply(.SD, function(x) ifelse(is.na(x), 0, x)),
+    .SDcols = age_prop_cols
   ]
-  
+
   race_cols <- new_colnames[grepl("cor", new_colnames)]
-  
+  race_prop_cols <- paste0(race_cols, "_prop")
+
   census_data[
     ,
     race_total := eval(parse(text = paste(race_cols, collapse = "+")))
   ]
   census_data[
     ,
-    (race_cols) := lapply(.SD, function(x) x / race_total),
+    (race_prop_cols) := lapply(.SD, function(x) x / race_total),
     .SDcols = race_cols
   ]
   census_data[
     ,
-    (race_cols) := lapply(.SD, function(x) round(x * moradores_total)),
-    .SDcols = race_cols
+    (race_prop_cols) := lapply(.SD, function(x) ifelse(is.na(x), 0, x)),
+    .SDcols = race_prop_cols
   ]
   
-  census_data[, renda_per_capita := renda_total / moradores_total]
+  inc_bracket_pop_cols <- paste0(income_bracket_cols, "_prop")
+  
+  census_data[
+    ,
+    (inc_bracket_pop_cols) := lapply(.SD, function(x) x / moradores_total),
+    .SDcols = income_bracket_cols
+  ]
+  census_data[
+    ,
+    (inc_bracket_pop_cols) := lapply(.SD, function(x) ifelse(is.na(x), 0, x)),
+    .SDcols = inc_bracket_pop_cols
+  ]
+  
+  # we can remove tracts that don't have any population on them, because they
+  # will not affect the aggregation processes from the census tracts to the
+  # statistical grid and, therefore, from the grid to the hexagons
+  
+  census_data <- census_data[
+    moradores_total > 0 | age_total > 0 | race_total > 0
+  ]
+
+  census_data[, c("age_total", age_cols) := NULL]
+  census_data[, c("race_total", race_cols) := NULL]
+  census_data[, c("moradores_total", income_bracket_cols) := NULL]
   
   return(census_data[])
 }
