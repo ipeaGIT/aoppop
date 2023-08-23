@@ -68,10 +68,10 @@ subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
 
 # stat_grid <- tar_read(census_statistical_grid)
 # urban_concentrations <- tar_read(urban_concentrations)
-# urban_concentration_tracts <- tar_read(urban_concentration_tracts)
+# tracts_with_data <- tar_read(tracts_with_data)
 subset_urban_conc_grid <- function(stat_grid,
                                    urban_concentrations,
-                                   urban_concentration_tracts) {
+                                   tracts_with_data) {
   # we can remove grid cells that don't have any population on them, because
   # they will not affect the aggregation processes from the census tracts to the
   # statistical grid and from the grid to the hexagons
@@ -94,18 +94,20 @@ subset_urban_conc_grid <- function(stat_grid,
   # finally, we have to intersect the statistical grid with the census tracts
   # that cover the urban concentrations, otherwise we would not properly count
   # the total population in each intersection between grid cells and tracts when
-  # aggregating census data to the statistical grid
+  # aggregating census data to the statistical grid. we use the 'grid_with_data'
+  # object to make sure that we're not considering tracts that don't have any
+  # population
   # (unifying the tracts before intersecting speeds up the process) 
   
-  unified_tracts <- parallel_union(
-    urban_concentration_tracts,
-    n_cores = min(8, getOption("TARGETS_N_CORES"))
-  )
+  n_cores <- min(8, getOption("TARGETS_N_CORES"))
+  
+  tracts_with_data <- sf::st_sf(tracts_with_data)
+  unified_tracts <- parallel_union(tracts_with_data, n_cores)
   
   filtered_grid <- parallel_intersection(
     filtered_grid,
     unified_tracts,
-    n_cores = min(10, getOption("TARGETS_N_CORES"))
+    n_cores
   )
   
   return(filtered_grid)

@@ -43,14 +43,6 @@ list(
     subset_urban_conc_tracts(census_tracts, urban_concentrations)
   ),
   tar_target(
-    urban_concentration_stat_grid,
-    subset_urban_conc_grid(
-      census_statistical_grid,
-      urban_concentrations,
-      urban_concentration_tracts
-    )
-  ),
-  tar_target(
     urban_conc_hex_grid,
     create_hex_grid(urban_concentrations, h3_resolutions),
     pattern = map(h3_resolutions)
@@ -68,5 +60,13 @@ list(
   tar_target(
     tracts_with_data,
     merge_census_tracts_data(urban_concentration_tracts, processed_census_data)
+  ),
+  tar_target(
+    urban_concentration_stat_grid,
+    subset_urban_conc_grid(
+      census_statistical_grid,
+      urban_concentrations,
+      tracts_with_data 
+    )
   )
 )

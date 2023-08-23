@@ -1,5 +1,5 @@
 name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
-agg_census_data_to_grid|function|cf2d417be723f27a|||||||||||||||
+agg_census_data_to_grid|function|f763b9a991e41a28|||||||||||||||
 bind_income_data|function|7cfb79fb518bd8c1|||||||||||||||
 calculate_widest_grid|function|53f0006ae2596944|||||||||||||||
 census_income_data|stem|6abeceff056382f5|f5a12aead8fedb4e|2ea8e0dc241d7ae7|-1681245207||t19586.6007638889s|aec862d37cee0a1f|4312856|rds|local|vector|||283.13||
@@ -15,19 +15,19 @@ h3_resolutions|stem|43e1e836a23f3120|a6518546d3c1361f|787f005495551c49|154086771
 merge_census_data|function|33339c6be4f2d33a|||||||||||||||
 merge_census_tracts_data|function|808c7d006c810f0d|||||||||||||||
 parallel_intersection|function|c8f557c9ca8cf183|||||||||||||||
-parallel_intersection_in_batches|function|89785abfa5447965|||||||||||||||
+parallel_intersection_in_batches|function|eaf907ffa27ca8ae|||||||||||||||
 parallel_union|function|81eed4bee16b5dc1|||||||||||||||
 process_census_data|function|fadc7c840e7ae5ce|||||||||||||||
 processed_census_data|stem|3196c5b82af562cd|57d6d588801c963d|499f3d183c91c610|-604718938||t19591.8317592593s|d7012c746116ff00|27952446|rds|local|vector|||3.28||
 subset_census_data|stem|ae27f11dfd2e77d9|3d23f89eb9bdcff5|49ddd655c8d7fbd0|1484406252||t19586.8822106481s|2d5c092e743e682b|26893604|rds|local|vector|||7.97||
 subset_census_data_path|stem|35d37647e545cdaf|b8fee86c623c6cae|ef46db3751d8e999|-253349633|../../data/acesso_oport/setores_censitarios/dados_censo2010A.csv|t16470.5504513889s|17b597127361faf4|2046696725|file|local|vector|||0||
-subset_urban_conc_grid|function|f708779f1b478ab4|||||||||||||||
+subset_urban_conc_grid|function|2ba55c8fa0bfb8a6|||||||||||||||
 subset_urban_conc_tracts|function|a756369954890c58|||||||||||||||
 tracts_with_data|stem|f43b8037ef8406ea|d54b1da55cb25c0b|eb79c905a52c064e|1987068791||t19591.8324305556s|ff29acbc5f8db1e3|135447171|rds|local|vector|||0.66||
 urban_conc_hex_grid|pattern|5c27880b56b8dcdc|e55dd422a0815532||1430187430||||568802264|rds|local|vector||urban_conc_hex_grid_48516523*urban_conc_hex_grid_e7bc620e*urban_conc_hex_grid_4012e8c9|1095.62||
 urban_conc_hex_grid_4012e8c9|branch|834de1894516de5e|e55dd422a0815532|871286e764c74f0e|523472560||t19588.0361458333s|6524cf2a4162e941|489655562|rds|local|vector|urban_conc_hex_grid||783.92||
 urban_conc_hex_grid_48516523|branch|995ed133c77ed2bb|e55dd422a0815532|c4e42713f3570fe6|-83158582||t19588.0211574074s|1f6de0828a7749f0|8896255|rds|local|vector|urban_conc_hex_grid||39.97||
 urban_conc_hex_grid_e7bc620e|branch|0ecf33a77fd75015|e55dd422a0815532|8e94b4907406a20e|1817788545||t19588.0246759259s|a0f8e15d36e74c89|70250447|rds|local|vector|urban_conc_hex_grid||271.73||
-urban_concentration_stat_grid|stem|c203820a8f4d4b0b|9d6d49dd3692b1a2|baa56589b49b2ea9|1001891043||t19591.893912037s|a72b69e9296f834f|38481667|rds|local|vector|||875.17|attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries|
+urban_concentration_stat_grid|stem|9f07d3d4b024a7be|970c32518026482e|b3471aeb8b1aec90|1001891043||t19592.8078125s|313ae89912f77c1b|40982153|rds|local|vector|||958.76|attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries. attribute variables are assumed to be spatially constant throughout all geometries|
 urban_concentration_tracts|stem|be91c8122bbb9a76|bd88b52e63584cef|69ae08a5c3768a9b|603952398||t19591.6526388889s|fa625bdd15805a0b|124909435|rds|local|vector|||100.17||
 urban_concentrations|stem|d78e05acb6827be4|c5dfd8ad3bacf11b|d24031bcbd3850d1|629064073||t19587.6931597222s|4ad08b78357578e3|1144434|rds|local|vector|||36.94||
