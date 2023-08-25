@@ -1,16 +1,22 @@
 options(
   TARGETS_SHOW_PROGRESS = TRUE,
-  TARGETS_N_CORES = 30
+  TARGETS_N_CORES = 20
 )
 
 suppressPackageStartupMessages({
   library(targets)
   library(ggplot2)
+  library(sf)
 })
 
 source("R/1_spatial_manipulation.R", encoding = "UTF-8")
 source("R/2_data_processing.R", encoding = "UTF-8")
 source("R/3_data_interpolation.R", encoding = "UTF-8")
+source("R/test.R", encoding = "UTF-8")
+
+if (!interactive()) future::plan(future.callr::callr, workers = getOption("TARGETS_N_CORES"))
+
+tar_option_set(workspace_on_error = TRUE)
 
 list(
   # basic input
@@ -68,5 +74,55 @@ list(
       urban_concentrations,
       tracts_with_data 
     )
+  ),
+  
+  # experimental
+  tar_target(
+    individual_urban_concentrations,
+    tar_group(dplyr::group_by(sf::st_transform(urban_concentrations, 4326), code_urban_concentration)),
+    iteration = "group"
+  ),
+  tar_target(less_res, 9)
+  ,
+  tar_target(
+    individual_hex_grids,
+    {
+      urban_conc_cells <- h3jsr::polygon_to_cells(individual_urban_concentrations, less_res)
+      urban_conc_grid <- h3jsr::cell_to_polygon(urban_conc_cells, simple = FALSE)
+      urban_conc_grid
+    },
+    retrieval = "worker",
+    storage = "worker",
+    deployment = "worker",
+    memory = "transient",
+    garbage_collection = TRUE,
+    pattern = cross(less_res, individual_urban_concentrations)
+  ),
+  tar_target(
+    individual_tracts_with_data,
+    filter_tracts_with_data(tracts_with_data, individual_urban_concentrations),
+    retrieval = "worker",
+    storage = "worker",
+    deployment = "worker",
+    memory = "transient",
+    garbage_collection = TRUE,
+    pattern = map(individual_urban_concentrations),
+    iteration = "list"
+  ),
+  tar_target(
+    statistical_grid_with_pop,
+    subset(census_statistical_grid, POP > 0),
+    format = "qs"
+  ),
+  tar_target(
+    individual_stat_grids,
+    filter_individual_stat_grids(
+      statistical_grid_with_pop,
+      individual_tracts_with_data
+    ),
+    retrieval = "worker",
+    storage = "worker",
+    pattern = map(individual_tracts_with_data),
+    iteration = "list"
   )
 )
