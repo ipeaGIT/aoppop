@@ -1,6 +1,6 @@
 options(
   TARGETS_SHOW_PROGRESS = TRUE,
-  TARGETS_N_CORES = 20
+  TARGETS_N_CORES = 25
 )
 
 suppressPackageStartupMessages({
@@ -82,8 +82,7 @@ list(
     tar_group(dplyr::group_by(sf::st_transform(urban_concentrations, 4326), code_urban_concentration)),
     iteration = "group"
   ),
-  tar_target(less_res, 9)
-  ,
+  tar_target(less_res, 9),
   tar_target(
     individual_hex_grids,
     {
@@ -111,8 +110,7 @@ list(
   ),
   tar_target(
     statistical_grid_with_pop,
-    subset(census_statistical_grid, POP > 0),
-    format = "qs"
+    subset(census_statistical_grid, POP > 0)
   ),
   tar_target(
     individual_stat_grids,
@@ -123,6 +121,17 @@ list(
     retrieval = "worker",
     storage = "worker",
     pattern = map(individual_tracts_with_data),
+    iteration = "list"
+  ),
+  tar_target(
+    stat_grid_with_data,
+    aggregate_data_to_stat_grid(
+      individual_stat_grids,
+      individual_tracts_with_data
+    ),
+    retrieval = "worker",
+    storage = "worker",
+    pattern = map(individual_stat_grids, individual_tracts_with_data),
     iteration = "list"
   )
 )
