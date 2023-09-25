@@ -142,6 +142,33 @@ aggregate_data_to_stat_grid <- function(stat_grid,
   return(grid_with_data)
 }
 
+# large_grids <- tar_read(large_stat_grids_with_data)
+# small_grids <- tar_read(small_stat_grids_with_data)
+# large_grids_indices <- tar_read(large_stat_grids_indices)
+bind_stat_grids <- function(large_grids, small_grids, large_grids_indices) {
+  # we want to make a larger list of individual statistical grids, in which the
+  # large grids are inserted exactly where they were before being separated
+  
+  all_grids <- small_grids
+  
+  for (i in seq.int(1, length(large_grids_indices))) {
+    all_grids <- append(
+      all_grids,
+      list(large_grids[[i]]),
+      after = large_grids_indices[i] - 1
+    )
+  }
+  
+  names(all_grids)[large_grids_indices] <- names(large_grids)
+  
+  # sanity check
+  if (!identical(all_grids[large_grids_indices], large_grids)) {
+    stop("Statistical grids merged in wrong position!")
+  }
+  
+  return(all_grids)
+}
+
 parallel_intersection <- function(x, y, n_cores) {
   if (n_cores == 1) {
     batch_indices = list(1:nrow(x))

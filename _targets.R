@@ -152,5 +152,14 @@ list(
     pattern = map(large_stat_grids, large_tracts_with_data),
     garbage_collection = TRUE,
     iteration = "list"
+  ),
+  tar_target(
+    stat_grids_with_data,
+    bind_stat_grids(
+      large_stat_grids_with_data,
+      small_stat_grids_with_data,
+      large_stat_grids_indices
+    ),
+    iteration = "list"
   )
 )
