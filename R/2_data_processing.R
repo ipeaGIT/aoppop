@@ -195,3 +195,222 @@ process_census_data <- function(subset_census_data, census_income_data) {
   
   return(census_data[])
 }
+
+# urban_concentration_tracts <- tar_read(urban_concentration_tracts)
+# processed_census_data <- tar_read(processed_census_data)
+merge_census_tracts_data <- function(urban_concentration_tracts,
+                                     processed_census_data) {
+  data.table::setDT(urban_concentration_tracts)
+  
+  tracts_with_data <- merge(
+    urban_concentration_tracts,
+    processed_census_data,
+    by.x = "code_tract",
+    by.y = "cod_setor"
+  )
+  
+  return(tracts_with_data)
+}
+
+# tracts_with_data <- tar_read(tracts_with_data)
+# urban_conc <- tar_read(individual_urban_concentrations)[1, ]
+filter_tracts_with_data <- function(tracts_with_data, urban_conc) {
+  tracts_with_data <- sf::st_sf(tracts_with_data)
+  
+  urban_conc <- sf::st_transform(urban_conc, sf::st_crs(tracts_with_data))
+  
+  intersections <- sf::st_intersects(
+    tracts_with_data,
+    sf::st_buffer(urban_conc, 2000)
+  )
+  do_intersect <- lengths(intersections) > 0
+  
+  individual_tracts <- tracts_with_data[do_intersect, ]
+  
+  # some tracts overlap, which create problems when later reaggregating census
+  # data to hex grid (population count would be overcounted). we remove these
+  # overlapping bits with st_difference(). the problem is that this function may
+  # cause some very-hard-to-track topology errors, in the format
+  # "TopologyException: side location conflict at x y".
+  #
+  # in order to deal with this, we assume that the function may throw an error.
+  # if it doesn't, great, we use the result. if it does, we use a buffer of 0
+  # meters to fix the geometries and then run the difference again.
+  #
+  # most of the urban concentrations will be fixed by this, but not all. when
+  # they are not fixed even by the buffer, we track down the points that cause
+  # the problem and manually fix the tracts around them.
+  #
+  # after all this cropping, the final result may contain some linestrings, so
+  # we make sure the output consists only of polygons by using
+  # st_collection_extract().
+  #
+  # FIXME: worry about this warning?
+  #   - although coordinates are longitude/latitude, st_difference assumes that
+  #     they are planar
+  
+  individual_tracts_or_error <- tryCatch(
+    sf::st_difference(individual_tracts),
+    error = function(cnd) cnd
+  )
+  
+  if (inherits(individual_tracts_or_error, "error")) {
+    individual_tracts <- sf::st_buffer(individual_tracts, 0)
+    
+    individual_tracts_or_error <- tryCatch(
+      sf::st_difference(individual_tracts),
+      error = function(cnd) cnd
+    )
+  } else {
+    individual_tracts <- sf::st_collection_extract(
+      individual_tracts_or_error,
+      "POLYGON"
+    )
+    individual_tracts <- sf::st_make_valid(individual_tracts)
+    
+    return(individual_tracts)
+  }
+  
+  while (inherits(individual_tracts_or_error, "error")) {
+    split_error_message <- strsplit(individual_tracts_or_error$message, " ")
+    bad_point_x <- as.numeric(split_error_message[[1]][6])
+    bad_point_y <- as.numeric(split_error_message[[1]][7])
+    bad_point <- sf::st_sfc(
+      sf::st_point(c(bad_point_x, bad_point_y)),
+      crs = sf::st_crs(individual_tracts)
+    )
+    
+    individual_tracts <- pontual_fix(individual_tracts, bad_point)
+    
+    individual_tracts_or_error <- tryCatch(
+      sf::st_difference(individual_tracts),
+      error = function(cnd) cnd
+    )
+  }
+  
+  individual_tracts <- sf::st_collection_extract(
+    individual_tracts_or_error,
+    "POLYGON"
+  )
+  individual_tracts <- sf::st_make_valid(individual_tracts)
+  
+  return(individual_tracts)
+}
+
+pontual_fix <- function(x, point) {
+  buffer_around_point <- sf::st_buffer(point, 100)
+  
+  intersecting_x <- sf::st_intersects(x, buffer_around_point)
+  do_intersect <- lengths(intersecting_x) > 0
+  bad_x <- x[do_intersect, ]
+  
+  fixed_bad_x <- custom_difference(bad_x)
+  
+  # remove bad polygons from object and bind fixed polygons to it
+  
+  fixed_x <- rbind(x[!do_intersect, ], fixed_bad_x)
+  
+  return(fixed_x)
+}
+
+custom_difference <- function(x) {
+  pb <- progress::progress_bar$new(
+    total = nrow(x),
+    format = "[:bar] :current/:total (:percent) eta: :eta"
+  )
+  
+  treated_x <- x
+  treated_x <- sf::st_make_valid(x)
+  
+  to_remove <- numeric()
+  
+  for (i in 1:nrow(x)) {
+    to_clip <- treated_x[i, ]
+    
+    mask <- treated_x[-c(i, to_remove), ]
+    
+    # suppressed message:
+    #   - although coordinates are longitude/latitude, st_overlaps assumes
+    #     that they are planar
+    
+    suppressMessages(overlaps <- sf::st_overlaps(mask, to_clip))
+    do_overlap <- lengths(overlaps) > 0
+    mask <- mask[do_overlap, ]
+    
+    if (nrow(mask) > 0) {
+      mask <- sf::st_union(mask)
+      mask <- sf::st_make_valid(mask)
+      
+      if (length(mask) > 1) {
+        # sometimes (if unioned mask has a linestring), st_make_valid results in
+        # an empty geometrycollection, so we union the object again just to make
+        # our mask consists of only one geometry)
+        mask <- sf::st_union(mask)
+        mask <- sf::st_make_valid(mask)
+      }
+      
+      # using dimension = "polygon" comes from this issue:
+      # https://github.com/r-spatial/sf/issues/1944
+      
+      clipped <- sf::st_difference(to_clip, mask, dimensions = "polygon")
+      
+      if (nrow(clipped) == 0) {
+        # for some reason, there are tracts completely covered by others. in
+        # this case, we keep the covered tracts in the data and later clip the
+        # ones that overlap it
+        next
+      }
+      
+      to_remove <- c(to_remove, i)
+      
+      treated_x <- rbind(treated_x, clipped)
+    }
+    
+    pb$tick()
+  }
+  
+  treated_x <- treated_x[-to_remove, ]
+  
+  return(treated_x)
+}
+
+# stat_grid <- tar_read(statistical_grid_with_pop)
+# tracts_with_data <- tar_read(individual_tracts_with_data)[[1]]
+filter_individual_stat_grids <- function(stat_grid, tracts_with_data) {
+  tracts_with_data <- sf::st_make_valid(tracts_with_data)
+  
+  # we first subset the statistical grid using st_intersects() because it is way
+  # faster than st_intersection() (just using the latter would yield the same
+  # result, but would take much longer)
+  
+  unified_tracts <- sf::st_union(tracts_with_data)
+  unified_tracts <- sf::st_make_valid(unified_tracts)
+  
+  intersections <- sf::st_intersects(stat_grid, unified_tracts)
+  do_intersect <- lengths(intersections) > 0
+  
+  filtered_grid <- stat_grid[do_intersect, ]
+  
+  # finally, we have to intersect the statistical grid with the census tracts
+  # that cover the urban concentrations, otherwise we would not properly count
+  # the total population in each intersection between grid cells and tracts when
+  # aggregating census data to the statistical grid. we use the 'grid_with_data'
+  # object to make sure that we're not considering tracts that don't have any
+  # population
+  # suppressed warning: 
+  #  - attribute variables are assumed to be spatially constant throughout all
+  #    geometries
+  
+  suppressWarnings(
+    filtered_grid <- sf::st_intersection(filtered_grid, unified_tracts)
+  )
+  
+  # the intersection operation may result in polygons so small that they become
+  # empty geometrycollections after st_make_valid(). we remove them, otherwise
+  # they generate NaN values when aggregating data to the statistical grid
+  
+  filtered_grid <- sf::st_make_valid(filtered_grid)
+  filtered_grid <- filtered_grid[!sf::st_is_empty(filtered_grid), ]
+  
+  return(filtered_grid)
+}

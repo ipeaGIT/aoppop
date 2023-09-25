@@ -1,6 +1,6 @@
 options(
   TARGETS_SHOW_PROGRESS = TRUE,
-  TARGETS_N_CORES = 25
+  TARGETS_N_CORES = 35
 )
 
 suppressPackageStartupMessages({
@@ -12,7 +12,6 @@ suppressPackageStartupMessages({
 source("R/1_spatial_manipulation.R", encoding = "UTF-8")
 source("R/2_data_processing.R", encoding = "UTF-8")
 source("R/3_data_interpolation.R", encoding = "UTF-8")
-source("R/test.R", encoding = "UTF-8")
 
 if (!interactive()) future::plan(future.callr::callr, workers = getOption("TARGETS_N_CORES"))
 
@@ -45,41 +44,13 @@ list(
   tar_target(census_statistical_grid, download_statistical_grid()),
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(
-    urban_concentration_tracts,
-    subset_urban_conc_tracts(census_tracts, urban_concentrations)
-  ),
-  tar_target(
-    urban_conc_hex_grid,
-    create_hex_grid(urban_concentrations, h3_resolutions),
-    pattern = map(h3_resolutions)
-  ),
-  
-  # data processing
-  tar_target(subset_census_data, filter_census_data(subset_census_data_path)),
-  tar_target(census_income_data, bind_income_data(census_income_data_paths)),
-  tar_target(
-    processed_census_data,
-    process_census_data(subset_census_data, census_income_data)
-  ),
-  
-  # data interpolation
-  tar_target(
-    tracts_with_data,
-    merge_census_tracts_data(urban_concentration_tracts, processed_census_data)
-  ),
-  tar_target(
-    urban_concentration_stat_grid,
-    subset_urban_conc_grid(
-      census_statistical_grid,
-      urban_concentrations,
-      tracts_with_data 
-    )
-  ),
-  
-  # experimental
-  tar_target(
     individual_urban_concentrations,
-    tar_group(dplyr::group_by(sf::st_transform(urban_concentrations, 4326), code_urban_concentration)),
+    tar_group(
+      dplyr::group_by(
+        sf::st_transform(urban_concentrations, 4326),
+        code_urban_concentration
+      )
+    ),
     iteration = "group"
   ),
   tar_target(less_res, 9),
@@ -92,19 +63,29 @@ list(
     },
     retrieval = "worker",
     storage = "worker",
-    deployment = "worker",
-    memory = "transient",
-    garbage_collection = TRUE,
     pattern = cross(less_res, individual_urban_concentrations)
+  ),
+  tar_target(
+    urban_concentration_tracts,
+    subset_urban_conc_tracts(census_tracts, urban_concentrations)
+  ),
+  
+  # data processing
+  tar_target(subset_census_data, filter_census_data(subset_census_data_path)),
+  tar_target(census_income_data, bind_income_data(census_income_data_paths)),
+  tar_target(
+    processed_census_data,
+    process_census_data(subset_census_data, census_income_data)
+  ),
+  tar_target(
+    tracts_with_data,
+    merge_census_tracts_data(urban_concentration_tracts, processed_census_data)
   ),
   tar_target(
     individual_tracts_with_data,
     filter_tracts_with_data(tracts_with_data, individual_urban_concentrations),
     retrieval = "worker",
     storage = "worker",
-    deployment = "worker",
-    memory = "transient",
-    garbage_collection = TRUE,
     pattern = map(individual_urban_concentrations),
     iteration = "list"
   ),
@@ -123,15 +104,53 @@ list(
     pattern = map(individual_tracts_with_data),
     iteration = "list"
   ),
+  
+  # data interpolation
   tar_target(
-    stat_grid_with_data,
+    large_stat_grids_indices,
+    which(vapply(individual_stat_grids, nrow, numeric(1)) > 10000)
+  ),
+  tar_target(
+    small_stat_grids,
+    individual_stat_grids[-large_stat_grids_indices],
+    iteration = "list"
+  ),
+  tar_target(
+    large_stat_grids,
+    individual_stat_grids[large_stat_grids_indices],
+    iteration = "list"
+  ),
+  tar_target(
+    small_tracts_with_data,
+    individual_tracts_with_data[-large_stat_grids_indices],
+    iteration = "list"
+  ),
+  tar_target(
+    large_tracts_with_data,
+    individual_tracts_with_data[large_stat_grids_indices],
+    iteration = "list"
+  ),
+  tar_target(
+    small_stat_grids_with_data,
     aggregate_data_to_stat_grid(
-      individual_stat_grids,
-      individual_tracts_with_data
+      small_stat_grids,
+      small_tracts_with_data,
+      manual_parallelization = FALSE
     ),
     retrieval = "worker",
     storage = "worker",
-    pattern = map(individual_stat_grids, individual_tracts_with_data),
+    pattern = map(small_stat_grids, small_tracts_with_data),
+    iteration = "list"
+  ),
+  tar_target(
+    large_stat_grids_with_data,
+    aggregate_data_to_stat_grid(
+      large_stat_grids,
+      large_tracts_with_data,
+      manual_parallelization = TRUE
+    ),
+    pattern = map(large_stat_grids, large_tracts_with_data),
+    garbage_collection = TRUE,
     iteration = "list"
   )
 )
