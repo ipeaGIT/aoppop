@@ -1,6 +1,6 @@
-# stat_grid <- tar_read(individual_stat_grids)[[1]]
-# tracts_with_data <- tar_read(individual_tracts_with_data)[[1]]
-# manual_parallelization <- TRUE
+# stat_grid <- tar_read(individual_stat_grids, 131)[[1]]
+# tracts_with_data <- tar_read(individual_tracts_with_data, 131)[[1]]
+# manual_parallelization <- FALSE
 aggregate_data_to_stat_grid <- function(stat_grid,
                                         tracts_with_data,
                                         manual_parallelization) {
@@ -102,8 +102,16 @@ aggregate_data_to_stat_grid <- function(stat_grid,
   
   data.table::setnames(grid_with_data, old = cols_to_sum, new = final_colnames)
   
-  data.table::setDT(stat_grid)
-  grid_with_data[stat_grid, on = "ID_UNICO", geom := i.geom]
+  # using data.table native left join would later result in an issue with some
+  # of the stat_grids (particularly São Roque's) in which the spatial objects
+  # would not be valid. related to
+  # https://github.com/Rdatatable/data.table/issues/4217
+  
+  grid_with_data <- dplyr::left_join(
+    grid_with_data,
+    stat_grid[, c("ID_UNICO", "geom")],
+    by = "ID_UNICO"
+  )
   
   grid_with_data <- sf::st_sf(grid_with_data)
   
@@ -167,6 +175,250 @@ bind_stat_grids <- function(large_grids, small_grids, large_grids_indices) {
   }
   
   return(all_grids)
+}
+
+# urban_concentration <- subset(tar_read(individual_urban_concentrations), tar_group == 130)
+# stat_grid <- tar_read(stat_grids_with_data)[[130]]
+# hex_grid <- tar_read(individual_hex_grids, branches = 187+187+130)[[1]]
+# res <- 9
+# manual_parallelization <- TRUE
+aggregate_data_to_hexagons <- function(urban_concentration,
+                                       stat_grid,
+                                       hex_grid,
+                                       res,
+                                       manual_parallelization) {
+  stat_grid <- sf::st_transform(stat_grid, 4326)
+  
+  # filter out hexagons that don't intersect with the grid cells, otherwise they
+  # would significantly slow down the intersection process
+  
+  unified_grid <- sf::st_union(stat_grid)
+  unified_grid <- sf::st_make_valid(unified_grid)
+  
+  intersecting_hexs <- sf::st_intersects(hex_grid, unified_grid)
+  do_intersect <- lengths(intersecting_hexs) > 0
+  
+  filtered_hex_grid <- hex_grid[do_intersect, ]
+  
+  # similarly, filter out stat grid cells that don't intersect with the
+  # hexagons. this happens because the individual statistical grids are
+  # generated from the census tracts. tracts that intersect with a buffer of 3
+  # km around the urban concentrations were kept to make sure that we would not
+  # lose any data, so we can have some grid cells that are very far from the
+  # actual urban concentrations, especially in more rural areas.
+  
+  unified_filtered_hexs <- sf::st_union(filtered_hex_grid)
+  
+  intersecting_grid_cells <- sf::st_intersects(stat_grid, unified_filtered_hexs)
+  do_intersect <- lengths(intersecting_grid_cells) > 0
+  
+  filtered_stat_grid <- stat_grid[do_intersect, ]
+  
+  # st_intersection can be quite slow with the datasets we have. so we first
+  # find which grid cells are fully contained by the hexagons, create a dataset
+  # with these cells and filter them out from the grid. then, we use these
+  # further filtered grid to calculate the intersections.
+  
+  contains <- sf::st_contains_properly(
+    filtered_hex_grid,
+    filtered_stat_grid
+  )
+  
+  containing_hexs <- data.table::data.table(
+    h3_address = filtered_hex_grid$h3_address,
+    contains = unclass(contains)
+  )
+  containing_hexs <- containing_hexs[
+    ,
+    .(cell_index = contains[[1]]),
+    by = h3_address
+  ]
+  containing_hexs[, ID_UNICO := filtered_stat_grid[cell_index, ]$ID_UNICO]
+  containing_hexs[, cell_index := NULL]
+  
+  # again, using dplyr's left_join() instead of data.table's because the latter
+  # can mess up with the object's attributes, which end up making the object
+  # invalid
+  
+  containing_hexs <- dplyr::left_join(
+    containing_hexs,
+    filtered_stat_grid,
+    by = "ID_UNICO"
+  )
+  containing_hexs <- sf::st_sf(containing_hexs)
+  sf::st_geometry(containing_hexs) <- "geometry"
+  
+  contained_cells_indices <- unlist(contains)
+  further_filtered_stat_grid <- filtered_stat_grid[-contained_cells_indices, ]
+  further_filtered_stat_grid <- sf::st_sf(further_filtered_stat_grid)
+  
+  hex_grid_intersection <- if (manual_parallelization) {
+    if (res == 9 && nrow(stat_grid) > 10000) {
+      parallel_intersection_in_batches(
+        filtered_hex_grid,
+        further_filtered_stat_grid,
+        n_batches = 2,
+        n_cores_union = 4,
+        n_cores_inter = getOption("TARGETS_N_CORES")
+      )
+    } else {
+      parallel_intersection(
+        filtered_hex_grid,
+        further_filtered_stat_grid,
+        n_cores = getOption("TARGETS_N_CORES")
+      )
+    }
+  } else {
+    sf::st_intersection(
+      filtered_hex_grid,
+      further_filtered_stat_grid
+    )
+  }
+  
+  # we bind the contained cells dataset with the intersection dataset before
+  # proceeding with the calculations.
+  
+  intersections <- rbind(containing_hexs, hex_grid_intersection)
+  
+  intersections <- sf::st_make_valid(intersections)
+  intersections$intersect_area <- as.numeric(sf::st_area(intersections))
+  
+  data.table::setDT(intersections)
+  
+  # we also change the name of some columns and calculate the proportion of each
+  # age, race and income group in each intersection.
+  
+  data.table::setnames(
+    intersections,
+    old = c("pop_total", "income"),
+    new = c("grid_cell_total_pop", "grid_cell_income")
+  )
+  
+  colnames <- names(intersections)
+  
+  income_bracket_cols <- colnames[grepl("moradores_SM", colnames)]
+  income_bracket_prop_cols <- paste0(income_bracket_cols, "_prop")
+  
+  intersections[
+    ,
+    (income_bracket_prop_cols) := lapply(
+      .SD,
+      function(x) x / grid_cell_total_pop
+    ),
+    .SDcols = income_bracket_cols
+  ]
+  
+  age_cols <- colnames[grepl("idade", colnames)]
+  age_prop_cols <- paste0(age_cols, "_prop")
+  
+  intersections[
+    ,
+    (age_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
+    .SDcols = age_cols
+  ]
+  
+  race_cols <- colnames[grepl("cor", colnames)]
+  race_prop_cols <- paste0(race_cols, "_prop")
+  
+  intersections[
+    ,
+    (race_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
+    .SDcols = race_cols
+  ]
+  
+  intersections[, c(income_bracket_cols, age_cols, race_cols) := NULL]
+  
+  # the rest of the process (the calculations themselves) are the same conducted
+  # in aggregate_data_to_stat_grid()
+  
+  intersections[, stat_cell_total_area := sum(intersect_area), by = ID_UNICO]
+  intersections[, prop_stat_cell_area := intersect_area / stat_cell_total_area]
+  
+  # calculating total income in each intersection. we assume that income is
+  # evenly distributed among individuals living in the same statistical grid
+  # cell, so it's proportional to the share of the cell in the intersection.
+  
+  intersections[
+    ,
+    intersect_population := prop_stat_cell_area * grid_cell_total_pop
+  ]
+  intersections[, intersect_income := prop_stat_cell_area * grid_cell_income]
+  
+  # to calculate the population count by race and age group in each
+  # intersection, we just need to multiply the population in each intersection
+  # by the proportions of each group, previously calculated
+  
+  group_prop_cols <- c(income_bracket_prop_cols, age_prop_cols, race_prop_cols)
+  new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
+  
+  intersections[
+    ,
+    (new_colnames) := lapply(.SD, function(x) x * intersect_population),
+    .SDcols = group_prop_cols
+  ]
+  
+  # the total population count, count per group and total income in each grid
+  # cell are the sum of each of the variables calculated above by hexagon
+  
+  cols_to_sum <- c("intersect_population", "intersect_income", new_colnames)
+  final_colnames <- sub("intersect_", "", cols_to_sum)
+  
+  hexs_with_data <- intersections[
+    ,
+    lapply(.SD, sum),
+    by = h3_address,
+    .SDcols = cols_to_sum
+  ]
+  
+  data.table::setnames(hexs_with_data, old = cols_to_sum, new = final_colnames)
+  
+  # finally, since we used filtered_hex_grid, and not hex_grid, to calculate the
+  # intersections, we need to merge our dataset "with data" with the complete
+  # hex grid. we fill the columns of hexagons "without data" with the
+  # appropriate values.
+  
+  data_cols <- setdiff(names(hexs_with_data), "h3_address")
+  
+  full_hexs_with_data <- dplyr::left_join(
+    hex_grid,
+    hexs_with_data,
+    by = "h3_address"
+  )
+  
+  data.table::setDT(full_hexs_with_data)
+  full_hexs_with_data[is.na(population), (data_cols) := 0]
+  full_hexs_with_data[, income_per_capita := income / population]
+  
+  full_hexs_with_data <- sf::st_sf(full_hexs_with_data)
+  
+  # save object as RDS and return the path
+  
+  project_dir <- "../../data/acesso_oport"
+  
+  urban_conc_hexs_dir <- file.path(project_dir, "hex_conc_urbanas")
+  if (!dir.exists(urban_conc_hexs_dir)) dir.create(urban_conc_hexs_dir)
+  
+  res_dir <- file.path(urban_conc_hexs_dir, paste0("res_", res))
+  if (!dir.exists(res_dir)) dir.create(res_dir)
+  
+  basename <- paste0(
+    treat_name(urban_concentration$name_urban_concentration),
+    ".rds"
+  )
+  
+  path <- file.path(res_dir, basename)
+  saveRDS(full_hexs_with_data, path)
+  
+  return(path)
+}
+
+treat_name <- function(urban_conc) {
+  urban_conc <- tolower(urban_conc)
+  urban_conc <- gsub("\\´", "'", urban_conc)
+  urban_conc <- gsub("\\/", "_", urban_conc)
+  urban_conc <- gsub(" ", "_", urban_conc)
+  urban_conc <- iconv(urban_conc, from = "UTF-8", to = "ASCII//TRANSLIT")
+  return(urban_conc)
 }
 
 parallel_intersection <- function(x, y, n_cores) {

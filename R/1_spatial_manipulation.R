@@ -54,3 +54,26 @@ subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
   
   return(filtered_tracts)
 }
+
+# res <- tar_read(h3_resolutions)[1]
+# urban_concentration <- tar_read(individual_urban_concentrations)[1, ]
+create_hex_grids <- function(res, urban_concentration) {
+  urban_conc_cells <- h3jsr::polygon_to_cells(urban_concentration, res)
+  urban_conc_grid <- h3jsr::cell_to_polygon(urban_conc_cells, simple = FALSE)
+  
+  # some adjacent urban concentrations (Rio de Janeiro and Angra, for example)
+  # may end up sharing some cells is common. in order to prevent the same cell
+  # from appearing twice in our final output, we keep only cells whose centroids
+  # are within the polygon.
+  # suppressed warning:
+  #  - st_centroid assumes attributes are constant over geometries
+  
+  grid_centroids <- suppressWarnings(sf::st_centroid(urban_conc_grid))
+  
+  contained_cells <- sf::st_within(grid_centroids, urban_concentration)
+  within_concentration <- lengths(contained_cells) > 0
+  
+  urban_conc_grid <- urban_conc_grid[within_concentration, ]
+  
+  return(urban_conc_grid)
+}
