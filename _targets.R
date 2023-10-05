@@ -43,6 +43,22 @@ list(
   tar_target(census_tracts, download_census_tracts()),
   tar_target(census_statistical_grid, download_statistical_grid()),
   tar_target(urban_concentrations, download_urban_concentrations()),
+  tar_target(pop_arrangements, download_pop_arrangements()),
+  tar_target(
+    pop_units,
+    merge_pop_units(urban_concentrations, pop_arrangements),
+    iteration = "group"
+  ),
+  tar_target(
+    hex_grids,
+    create_hex_grid(h3_resolutions, pop_units),
+    pattern = cross(h3_resolutions, pop_units),
+    retrieval = "worker",
+    storage = "worker",
+    iteration = "list"
+  ),
+  
+  
   tar_target(
     individual_urban_concentrations,
     tar_group(
