@@ -1,3 +1,144 @@
+prepare_census_data <- function() {
+  # census variables:
+  #   - Dom2_V002 -> total residents count
+  #   - DomRend_V003 -> total income
+  #   - Pess3_V002:V006 -> population count by color/race
+  #   - Pess13_V023:Pess13_V134 -> population count by age group
+  
+  dom <- censobr::read_tracts(dataset = "Domicilio")
+  dom <- dplyr::select(
+    dom,
+    code_tract, code_muni, code_state, domicilio02_V002
+  )
+  
+  dom_renda <- censobr::read_tracts(dataset = "DomicilioRenda")
+  dom_renda <- dplyr::select(dom_renda, c(code_tract, V003))
+  
+  # FIXME: censobr Pessoa table is missing the tract 250010605000004.
+  pess <- censobr::read_tracts(dataset = "Pessoa")
+  pess <- dplyr::select(
+    pess,
+    code_tract, pessoa03_V002:pessoa03_V006, pessoa13_V023:pessoa13_V134
+  )
+  
+  census_data <- dplyr::left_join(dom, dom_renda, by = "code_tract")
+  census_data <- dplyr::left_join(census_data, pess, by = "code_tract")
+  
+  # I don't think using expressions like this is very dplyr-idiomatic. the
+  # more idiomatic way of calculating the totals like this would be to use
+  # rowwise(), I suppose, but arrow dplyr queries don't support it
+  
+  expr <- parse(text = paste(paste0("pessoa13_V0", 23:39), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_0a5 = eval(expr))
+  
+  expr <- parse(text = paste(paste0("pessoa13_V0", 40:48), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_6a14 = eval(expr))
+  
+  expr <- parse(text = paste(paste0("pessoa13_V0", 49:52), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_15a18 = eval(expr))
+  
+  expr <- parse(text = paste(paste0("pessoa13_V0", 53:58), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_19a24 = eval(expr))
+  
+  expr <- parse(text = paste(paste0("pessoa13_V0", 59:73), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_25a39 = eval(expr))
+  
+  expr <- parse(
+    text = paste(
+      paste0("pessoa13_V", formatC(74:103, width = 3, flag = "0")),
+      collapse = "+"
+    )
+  )
+  census_data <- dplyr::mutate(census_data, idade_40a69 = eval(expr))
+  
+  expr <- parse(text = paste(paste0("pessoa13_V", 104:134), collapse = "+"))
+  census_data <- dplyr::mutate(census_data, idade_70mais = eval(expr))
+  
+  census_data <- dplyr::select(
+    census_data,
+    cod_setor = code_tract,
+    cod_muni = code_muni,
+    cod_uf = code_state,
+    renda_total = V003,
+    moradores_total = domicilio02_V002,
+    cor_branca = pessoa03_V002,
+    cor_preta = pessoa03_V003,
+    cor_amarela = pessoa03_V004,
+    cor_parda = pessoa03_V005,
+    cor_indigena = pessoa03_V006,
+    dplyr::starts_with("idade")
+  )
+  
+  # total population count will be derived from statistical grid data, not from
+  # census data. from the census data, we want the proportions of each
+  #
+  # FIXME: there are tracts with 0 moredores_total and non negligibles
+  # age_total and race_total. investigate the difference between these variables
+  # again.
+  
+  cols <- names(census_data)
+  age_cols <- cols[grepl("^idade_", cols)]
+  race_cols <- cols[grepl("^cor_", cols)]
+  
+  expr <- parse(text = paste(age_cols, collapse = "+"))
+  census_data <- dplyr::mutate(census_data, age_total = eval(expr))
+  census_data <- dplyr::mutate(
+    census_data,
+    dplyr::across(
+      dplyr::starts_with("idade"),
+      list(prop = ~ . / age_total)
+    )
+  )
+  
+  expr <- parse(text = paste(race_cols, collapse = "+"))
+  census_data <- dplyr::mutate(census_data, race_total = eval(expr))
+  census_data <- dplyr::mutate(
+    census_data,
+    dplyr::across(
+      dplyr::starts_with("cor"),
+      list(prop = ~ . / race_total)
+    )
+  )
+  
+  census_data <- dplyr::select(
+    census_data,
+    dplyr::starts_with("cod"),
+    renda_total,
+    moradores_total,
+    age_total,
+    race_total,
+    dplyr::contains("prop")
+  )
+  
+  # data variables may contain NAs (the equivalent of the Xs that appear on IBGE
+  # raw tables), which we substitute by 0s. we collect the dataframe because
+  # this is easier to do with data.table
+  
+  census_data <- dplyr::collect(census_data)
+  
+  int_cols <- setdiff(
+    names(census_data),
+    c("cod_setor", "cod_municipio", "cod_uf")
+  )
+  
+  for (col in int_cols) {
+    census_data[is.na(get(col)), (col) := 0]
+  }
+  
+  # we can remove tracts that don't have any population on them, because they
+  # will not affect the aggregation processes from the census tracts to the
+  # statistical grid and, therefore, from the grid to the hexagons
+  
+  census_data <- census_data[
+    moradores_total > 0 | age_total > 0 | race_total > 0
+  ]
+  
+  census_data[, c("moradores_total", "age_total", "race_total") := NULL]
+  
+  return(census_data[])
+}
+
+
 # census_data_path <- tar_read(census_data_path)
 filter_census_data <- function(census_data_path) {
   census_data <- data.table::fread(

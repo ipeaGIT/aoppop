@@ -83,6 +83,10 @@ list(
   ),
   
   # data processing
+  tar_target(census_data, prepare_census_data()),
+  
+  
+  
   tar_target(subset_census_data, filter_census_data(subset_census_data_path)),
   tar_target(census_income_data, bind_income_data(census_income_data_paths)),
   tar_target(

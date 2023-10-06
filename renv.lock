@@ -161,6 +161,28 @@
       ],
       "Hash": "20d81ec18bde233d8cc3265761fe8c93"
     },
+    "arrow": {
+      "Package": "arrow",
+      "Version": "12.0.1.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "R6",
+        "assertthat",
+        "bit64",
+        "cpp11",
+        "glue",
+        "methods",
+        "purrr",
+        "rlang",
+        "stats",
+        "tidyselect",
+        "utils",
+        "vctrs"
+      ],
+      "Hash": "9ff9955a1766e0bc3493f06d8f43c97e"
+    },
     "askpass": {
       "Package": "askpass",
       "Version": "1.1",
@@ -170,6 +192,16 @@
         "sys"
       ],
       "Hash": "e8a22846fff485f0be3770c2da758713"
+    },
+    "assertthat": {
+      "Package": "assertthat",
+      "Version": "0.2.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "tools"
+      ],
+      "Hash": "50c838a310445e954bc13f26f26a6ecf"
     },
     "backports": {
       "Package": "backports",
@@ -200,6 +232,30 @@
         "backports"
       ],
       "Hash": "0c54cf3a08cc0e550fbd64ad33166143"
+    },
+    "bit": {
+      "Package": "bit",
+      "Version": "4.0.5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R"
+      ],
+      "Hash": "d242abec29412ce988848d0294b208fd"
+    },
+    "bit64": {
+      "Package": "bit64",
+      "Version": "4.0.5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "bit",
+        "methods",
+        "stats",
+        "utils"
+      ],
+      "Hash": "9fe98599ca456d6552421db0d6772d8f"
     },
     "bslib": {
       "Package": "bslib",
@@ -256,6 +312,26 @@
         "tibble"
       ],
       "Hash": "f61dbaec772ccd2e17705c1e872e9e7c"
+    },
+    "censobr": {
+      "Package": "censobr",
+      "Version": "0.2.009999",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "ipeaGIT",
+      "RemoteRepo": "censobr",
+      "RemoteRef": "882ba3f2e304da2624cdd34a4ad0b02b556220e3",
+      "RemoteSha": "882ba3f2e304da2624cdd34a4ad0b02b556220e3",
+      "Requirements": [
+        "R",
+        "arrow",
+        "checkmate",
+        "dplyr",
+        "httr",
+        "tools"
+      ],
+      "Hash": "c0bdebd37f938e13faca5ea218b41033"
     },
     "checkmate": {
       "Package": "checkmate",
