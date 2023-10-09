@@ -51,6 +51,16 @@ download_pop_arrangements <- function() {
   return(pop_arrangements)
 }
 
+download_immediate_regions <- function() {
+  immediate_regions <- geobr::read_immediate_region(
+    year = 2017,
+    simplified = FALSE
+  )
+  immediate_regions <- sf::st_make_valid(immediate_regions)
+  
+  return(pop_arrangements)
+}
+
 # concs <- tar_read(urban_concentrations)
 # arrangs <- tar_read(pop_arrangements)
 merge_pop_units <- function(concs, arrangs) {
