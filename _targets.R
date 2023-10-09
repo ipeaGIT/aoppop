@@ -18,26 +18,7 @@ if (!interactive()) future::plan(future.callr::callr, workers = getOption("TARGE
 tar_option_set(workspace_on_error = TRUE)
 
 list(
-  # basic input
   tar_target(h3_resolutions, 7:9),
-  tar_target(
-    subset_census_data_path,
-    "../../data/acesso_oport/setores_censitarios/dados_censo2010A.csv",
-    format = "file"
-  ),
-  tar_target(
-    census_income_data_paths,
-    list.files(
-      file.path(
-        Sys.getenv("IPEA_DATA_PATH"),
-        "PUBLICO/CENSO/Setor_Censitario/2010/Originais/"
-      ),
-      pattern = "Entorno04.+\\.(xls|XLS)$",
-      recursive = TRUE,
-      full.names = TRUE
-    ),
-    format = "file"
-  ),
   
   # spatial manipulation
   tar_target(census_tracts, download_census_tracts()),
@@ -57,52 +38,23 @@ list(
     storage = "worker",
     iteration = "list"
   ),
-  
-  
   tar_target(
-    individual_urban_concentrations,
-    tar_group(
-      dplyr::group_by(
-        sf::st_transform(urban_concentrations, 4326),
-        code_urban_concentration
-      )
-    ),
-    iteration = "group"
-  ),
-  tar_target(
-    individual_hex_grids,
-    create_hex_grids(h3_resolutions, individual_urban_concentrations),
-    retrieval = "worker",
-    storage = "worker",
-    pattern = cross(h3_resolutions, individual_urban_concentrations),
-    iteration = "list"
-  ),
-  tar_target(
-    urban_concentration_tracts,
-    subset_urban_conc_tracts(census_tracts, urban_concentrations)
+    pop_units_tracts,
+    subset_pop_units_tracts(census_tracts, pop_units)
   ),
   
   # data processing
   tar_target(census_data, prepare_census_data()),
-  
-  
-  
-  tar_target(subset_census_data, filter_census_data(subset_census_data_path)),
-  tar_target(census_income_data, bind_income_data(census_income_data_paths)),
-  tar_target(
-    processed_census_data,
-    process_census_data(subset_census_data, census_income_data)
-  ),
   tar_target(
     tracts_with_data,
-    merge_census_tracts_data(urban_concentration_tracts, processed_census_data)
+    merge_census_tracts_data(pop_units_tracts, census_data)
   ),
   tar_target(
     individual_tracts_with_data,
-    filter_tracts_with_data(tracts_with_data, individual_urban_concentrations),
+    filter_tracts_with_data(tracts_with_data, pop_units),
+    pattern = map(pop_units),
     retrieval = "worker",
     storage = "worker",
-    pattern = map(individual_urban_concentrations),
     iteration = "list"
   ),
   tar_target(
@@ -115,9 +67,9 @@ list(
       statistical_grid_with_pop,
       individual_tracts_with_data
     ),
+    pattern = map(individual_tracts_with_data),
     retrieval = "worker",
     storage = "worker",
-    pattern = map(individual_tracts_with_data),
     iteration = "list"
   ),
   
@@ -153,9 +105,9 @@ list(
       small_tracts_with_data,
       manual_parallelization = FALSE
     ),
+    pattern = map(small_stat_grids, small_tracts_with_data),
     retrieval = "worker",
     storage = "worker",
-    pattern = map(small_stat_grids, small_tracts_with_data),
     iteration = "list"
   ),
   tar_target(
@@ -184,11 +136,10 @@ list(
     large_indices_for_res_7,
     {
       large <- dplyr::filter(
-        individual_urban_concentrations,
-        code_urban_concentration %in% c(3550308, 5300108, 4106902, 3304557)
+        pop_units,
+        code_pop_unit %in% c(3550308, 5300108, 4106902, 3304557)
       )
       indices <- large$tar_group
-      indices <- indices[order(indices)]
       indices
     }
   ),
@@ -203,181 +154,180 @@ list(
     iteration = "list"
   ),
   tar_target(
-    small_individual_hex_grids_res_7,
-    head(individual_hex_grids, 187)[-large_indices_for_res_7],
+    small_hex_grids_res_7,
+    head(hex_grids, 187)[-large_indices_for_res_7],
     iteration = "list"
   ),
   tar_target(
-    large_individual_hex_grids_res_7,
-    head(individual_hex_grids, 187)[large_indices_for_res_7],
+    large_hex_grids_res_7,
+    head(hex_grids, 187)[large_indices_for_res_7],
     iteration = "list"
   ),
   tar_target(
-    small_individual_urban_concentrations_res_7,
+    small_pop_units_res_7,
     {
-      concs <- individual_urban_concentrations
-      concs <- concs[! concs$tar_group %in% large_indices_for_res_7, ]
-      concs <- concs[order(concs$tar_group), ]
-      concs$tar_group <- seq.int(1, nrow(concs))
-      concs <- sf::st_drop_geometry(concs)
-      concs
+      units <- pop_units
+      units <- units[! units$tar_group %in% large_indices_for_res_7, ]
+      units$tar_group <- seq.int(1, nrow(units))
+      units <- sf::st_drop_geometry(units)
+      units
     },
     iteration = "group"
   ),
   tar_target(
-    large_individual_urban_concentrations_res_7,
+    large_pop_units_res_7,
     {
-      concs <- individual_urban_concentrations
-      concs <- concs[concs$tar_group %in% large_indices_for_res_7, ]
-      concs <- concs[order(concs$tar_group), ]
-      concs$tar_group <- seq.int(1, nrow(concs))
-      concs <- sf::st_drop_geometry(concs)
-      concs
+      units <- pop_units
+      units <- units[units$tar_group %in% large_indices_for_res_7, ]
+      units$tar_group <- seq.int(1, nrow(units))
+      units <- sf::st_drop_geometry(units)
+      units
     },
     iteration = "group"
   ),
   tar_target(
     small_hexagons_with_data_res_7,
     aggregate_data_to_hexagons(
-      small_individual_urban_concentrations_res_7,
+      small_pop_units_res_7,
       small_stat_grids_with_data_res_7,
-      small_individual_hex_grids_res_7,
+      small_hex_grids_res_7,
       res = 7,
       manual_parallelization = FALSE
     ),
+    pattern = map(
+      small_pop_units_res_7,
+      small_stat_grids_with_data_res_7,
+      small_hex_grids_res_7
+    ),
     retrieval = "worker",
     storage = "worker",
-    pattern = map(
-      small_individual_urban_concentrations_res_7,
-      small_stat_grids_with_data_res_7,
-      small_individual_hex_grids_res_7
-    ),
     iteration = "list",
     format = "file"
   ),
   tar_target(
     large_hexagons_with_data_res_7,
     aggregate_data_to_hexagons(
-      large_individual_urban_concentrations_res_7,
+      large_pop_units_res_7,
       large_stat_grids_with_data_res_7,
-      large_individual_hex_grids_res_7,
+      large_hex_grids_res_7,
       res = 7,
       manual_parallelization = TRUE
     ),
-    garbage_collection = TRUE, 
     pattern = map(
-      large_individual_urban_concentrations_res_7,
+      large_pop_units_res_7,
       large_stat_grids_with_data_res_7,
-      large_individual_hex_grids_res_7
+      large_hex_grids_res_7
     ),
-    iteration = "list",
-    format = "file"
-  ),
-  
-  # statistical grid to hexagons res 8
-  tar_target(
-    large_indices_for_res_8,
-    which(vapply(individual_stat_grids, nrow, numeric(1)) > 4500)
-  ),
-  tar_target(
-    small_stat_grids_with_data_res_8,
-    stat_grids_with_data[-large_indices_for_res_8],
-    iteration = "list"
-  ),
-  tar_target(
-    large_stat_grids_with_data_res_8,
-    stat_grids_with_data[large_indices_for_res_8],
-    iteration = "list"
-  ),
-  tar_target(
-    small_individual_hex_grids_res_8,
-    individual_hex_grids[188:374][-large_indices_for_res_8],
-    iteration = "list"
-  ),
-  tar_target(
-    large_individual_hex_grids_res_8,
-    individual_hex_grids[188:374][large_indices_for_res_8],
-    iteration = "list"
-  ),
-  tar_target(
-    small_individual_urban_concentrations_res_8,
-    {
-      concs <- individual_urban_concentrations
-      concs <- concs[! concs$tar_group %in% large_indices_for_res_8, ]
-      concs <- concs[order(concs$tar_group), ]
-      concs$tar_group <- seq.int(1, nrow(concs))
-      concs <- sf::st_drop_geometry(concs)
-      concs
-    },
-    iteration = "group"
-  ),
-  tar_target(
-    large_individual_urban_concentrations_res_8,
-    {
-      concs <- individual_urban_concentrations
-      concs <- concs[concs$tar_group %in% large_indices_for_res_8, ]
-      concs <- concs[order(concs$tar_group), ]
-      concs$tar_group <- seq.int(1, nrow(concs))
-      concs <- sf::st_drop_geometry(concs)
-      concs
-    },
-    iteration = "group"
-  ),
-  tar_target(
-    small_hexagons_with_data_res_8,
-    aggregate_data_to_hexagons(
-      small_individual_urban_concentrations_res_8,
-      small_stat_grids_with_data_res_8,
-      small_individual_hex_grids_res_8,
-      res = 8,
-      manual_parallelization = FALSE
-    ),
-    retrieval = "worker",
-    storage = "worker",
-    pattern = map(
-      small_individual_urban_concentrations_res_8,
-      small_stat_grids_with_data_res_8,
-      small_individual_hex_grids_res_8
-    ),
-    iteration = "list",
-    format = "file"
-  ),
-  tar_target(
-    large_hexagons_with_data_res_8,
-    aggregate_data_to_hexagons(
-      large_individual_urban_concentrations_res_8,
-      large_stat_grids_with_data_res_8,
-      large_individual_hex_grids_res_8,
-      res = 8,
-      manual_parallelization = TRUE
-    ),
-    garbage_collection = TRUE, 
-    pattern = map(
-      large_individual_urban_concentrations_res_8,
-      large_stat_grids_with_data_res_8,
-      large_individual_hex_grids_res_8
-    ),
-    iteration = "list",
-    format = "file"
-  ),
-  
-  # statistical grid to hexagons res 9
-  tar_target(
-    hexagons_with_data_res_9,
-    aggregate_data_to_hexagons(
-      individual_urban_concentrations,
-      stat_grids_with_data,
-      individual_hex_grids,
-      res = 9,
-      manual_parallelization = TRUE
-    ),
-    garbage_collection = TRUE, 
-    pattern = map(
-      individual_urban_concentrations,
-      stat_grids_with_data,
-      tail(individual_hex_grids, 187)
-    ),
+    garbage_collection = TRUE,
     iteration = "list",
     format = "file"
   )
+  # ,
+  # 
+  # # statistical grid to hexagons res 8
+  # tar_target(
+  #   large_indices_for_res_8,
+  #   which(vapply(individual_stat_grids, nrow, numeric(1)) > 4500)
+  # ),
+  # tar_target(
+  #   small_stat_grids_with_data_res_8,
+  #   stat_grids_with_data[-large_indices_for_res_8],
+  #   iteration = "list"
+  # ),
+  # tar_target(
+  #   large_stat_grids_with_data_res_8,
+  #   stat_grids_with_data[large_indices_for_res_8],
+  #   iteration = "list"
+  # ),
+  # tar_target(
+  #   small_individual_hex_grids_res_8,
+  #   individual_hex_grids[188:374][-large_indices_for_res_8],
+  #   iteration = "list"
+  # ),
+  # tar_target(
+  #   large_individual_hex_grids_res_8,
+  #   individual_hex_grids[188:374][large_indices_for_res_8],
+  #   iteration = "list"
+  # ),
+  # tar_target(
+  #   small_individual_urban_concentrations_res_8,
+  #   {
+  #     concs <- individual_urban_concentrations
+  #     concs <- concs[! concs$tar_group %in% large_indices_for_res_8, ]
+  #     concs <- concs[order(concs$tar_group), ]
+  #     concs$tar_group <- seq.int(1, nrow(concs))
+  #     concs <- sf::st_drop_geometry(concs)
+  #     concs
+  #   },
+  #   iteration = "group"
+  # ),
+  # tar_target(
+  #   large_individual_urban_concentrations_res_8,
+  #   {
+  #     concs <- individual_urban_concentrations
+  #     concs <- concs[concs$tar_group %in% large_indices_for_res_8, ]
+  #     concs <- concs[order(concs$tar_group), ]
+  #     concs$tar_group <- seq.int(1, nrow(concs))
+  #     concs <- sf::st_drop_geometry(concs)
+  #     concs
+  #   },
+  #   iteration = "group"
+  # ),
+  # tar_target(
+  #   small_hexagons_with_data_res_8,
+  #   aggregate_data_to_hexagons(
+  #     small_individual_urban_concentrations_res_8,
+  #     small_stat_grids_with_data_res_8,
+  #     small_individual_hex_grids_res_8,
+  #     res = 8,
+  #     manual_parallelization = FALSE
+  #   ),
+  #   retrieval = "worker",
+  #   storage = "worker",
+  #   pattern = map(
+  #     small_individual_urban_concentrations_res_8,
+  #     small_stat_grids_with_data_res_8,
+  #     small_individual_hex_grids_res_8
+  #   ),
+  #   iteration = "list",
+  #   format = "file"
+  # ),
+  # tar_target(
+  #   large_hexagons_with_data_res_8,
+  #   aggregate_data_to_hexagons(
+  #     large_individual_urban_concentrations_res_8,
+  #     large_stat_grids_with_data_res_8,
+  #     large_individual_hex_grids_res_8,
+  #     res = 8,
+  #     manual_parallelization = TRUE
+  #   ),
+  #   garbage_collection = TRUE, 
+  #   pattern = map(
+  #     large_individual_urban_concentrations_res_8,
+  #     large_stat_grids_with_data_res_8,
+  #     large_individual_hex_grids_res_8
+  #   ),
+  #   iteration = "list",
+  #   format = "file"
+  # ),
+  # 
+  # # statistical grid to hexagons res 9
+  # tar_target(
+  #   hexagons_with_data_res_9,
+  #   aggregate_data_to_hexagons(
+  #     individual_urban_concentrations,
+  #     stat_grids_with_data,
+  #     individual_hex_grids,
+  #     res = 9,
+  #     manual_parallelization = TRUE
+  #   ),
+  #   garbage_collection = TRUE, 
+  #   pattern = map(
+  #     individual_urban_concentrations,
+  #     stat_grids_with_data,
+  #     tail(individual_hex_grids, 187)
+  #   ),
+  #   iteration = "list",
+  #   format = "file"
+  # )
 )

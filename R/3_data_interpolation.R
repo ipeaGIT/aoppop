@@ -1,5 +1,5 @@
-# stat_grid <- tar_read(individual_stat_grids, 131)[[1]]
-# tracts_with_data <- tar_read(individual_tracts_with_data, 131)[[1]]
+# stat_grid <- tar_read(individual_stat_grids, 1)[[1]]
+# tracts_with_data <- tar_read(individual_tracts_with_data, 1)[[1]]
 # manual_parallelization <- FALSE
 aggregate_data_to_stat_grid <- function(stat_grid,
                                         tracts_with_data,
@@ -60,7 +60,7 @@ aggregate_data_to_stat_grid <- function(stat_grid,
   # intersection. income is distributed according to this share - i.e. we assume
   # that income is evenly distributed among individuals living in the same tract
   
-  grid_tracts_intersection[, intersect_population := prop_grid_area * POP]
+  grid_tracts_intersection[, intersect_population := prop_grid_area * pop_count]
   grid_tracts_intersection[
     ,
     tract_population := sum(intersect_population),
@@ -91,11 +91,14 @@ aggregate_data_to_stat_grid <- function(stat_grid,
   # the sum of each of the variables calculated above by grid cell
   
   cols_to_sum <- c("intersect_income", new_colnames)
-  final_colnames <- sub("intersect_", "", cols_to_sum)
+  final_colnames <- c("renda", sub("intersect_", "", cols_to_sum[-1]))
   
   grid_with_data <- grid_tracts_intersection[
     ,
-    append(list(pop_total = POP[1]), lapply(.SD, sum)),
+    append(
+      list(pop_total = pop_count[1], homens = men[1], mulheres = women[1]),
+      lapply(.SD, sum)
+    ),
     by = ID_UNICO,
     .SDcols = cols_to_sum
   ]
@@ -177,18 +180,16 @@ bind_stat_grids <- function(large_grids, small_grids, large_grids_indices) {
   return(all_grids)
 }
 
-# urban_concentration <- subset(tar_read(individual_urban_concentrations), tar_group == 130)
-# stat_grid <- tar_read(stat_grids_with_data)[[130]]
-# hex_grid <- tar_read(individual_hex_grids, branches = 187+187+130)[[1]]
-# res <- 9
-# manual_parallelization <- TRUE
-aggregate_data_to_hexagons <- function(urban_concentration,
+# pop_unit <- subset(tar_read(pop_units), tar_group == 1)
+# stat_grid <- tar_read(stat_grids_with_data)[[1]]
+# hex_grid <- tar_read(hex_grids, branches = 1)[[1]]
+# res <- 7
+# manual_parallelization <- FALSE
+aggregate_data_to_hexagons <- function(pop_unit,
                                        stat_grid,
                                        hex_grid,
                                        res,
                                        manual_parallelization) {
-  stat_grid <- sf::st_transform(stat_grid, 4326)
-  
   # filter out hexagons that don't intersect with the grid cells, otherwise they
   # would significantly slow down the intersection process
   
@@ -203,9 +204,9 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   # similarly, filter out stat grid cells that don't intersect with the
   # hexagons. this happens because the individual statistical grids are
   # generated from the census tracts. tracts that intersect with a buffer of 3
-  # km around the urban concentrations were kept to make sure that we would not
-  # lose any data, so we can have some grid cells that are very far from the
-  # actual urban concentrations, especially in more rural areas.
+  # km around the population units were kept to make sure that we would not lose
+  # any data, so we can have some grid cells that are very far from the actual
+  # urban concentrations, especially in more rural areas.
   
   unified_filtered_hexs <- sf::st_union(filtered_hex_grid)
   
@@ -269,10 +270,7 @@ aggregate_data_to_hexagons <- function(urban_concentration,
       )
     }
   } else {
-    sf::st_intersection(
-      filtered_hex_grid,
-      further_filtered_stat_grid
-    )
+    sf::st_intersection(filtered_hex_grid, further_filtered_stat_grid)
   }
   
   # we bind the contained cells dataset with the intersection dataset before
@@ -290,23 +288,16 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   
   data.table::setnames(
     intersections,
-    old = c("pop_total", "income"),
-    new = c("grid_cell_total_pop", "grid_cell_income")
+    old = c("pop_total", "homens", "mulheres", "renda"),
+    new = c(
+      "grid_cell_total_pop",
+      "grid_cell_men",
+      "grid_cell_women",
+      "grid_cell_income"
+    )
   )
   
   colnames <- names(intersections)
-  
-  income_bracket_cols <- colnames[grepl("moradores_SM", colnames)]
-  income_bracket_prop_cols <- paste0(income_bracket_cols, "_prop")
-  
-  intersections[
-    ,
-    (income_bracket_prop_cols) := lapply(
-      .SD,
-      function(x) x / grid_cell_total_pop
-    ),
-    .SDcols = income_bracket_cols
-  ]
   
   age_cols <- colnames[grepl("idade", colnames)]
   age_prop_cols <- paste0(age_cols, "_prop")
@@ -326,7 +317,7 @@ aggregate_data_to_hexagons <- function(urban_concentration,
     .SDcols = race_cols
   ]
   
-  intersections[, c(income_bracket_cols, age_cols, race_cols) := NULL]
+  intersections[, c(age_cols, race_cols) := NULL]
   
   # the rest of the process (the calculations themselves) are the same conducted
   # in aggregate_data_to_stat_grid()
@@ -340,7 +331,11 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   
   intersections[
     ,
-    intersect_population := prop_stat_cell_area * grid_cell_total_pop
+    `:=`(
+      intersect_population = prop_stat_cell_area * grid_cell_total_pop,
+      intersect_men = prop_stat_cell_area * grid_cell_men,
+      intersect_women = prop_stat_cell_area * grid_cell_women
+    )
   ]
   intersections[, intersect_income := prop_stat_cell_area * grid_cell_income]
   
@@ -348,7 +343,7 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   # intersection, we just need to multiply the population in each intersection
   # by the proportions of each group, previously calculated
   
-  group_prop_cols <- c(income_bracket_prop_cols, age_prop_cols, race_prop_cols)
+  group_prop_cols <- c(age_prop_cols, race_prop_cols)
   new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
   
   intersections[
@@ -360,8 +355,11 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   # the total population count, count per group and total income in each grid
   # cell are the sum of each of the variables calculated above by hexagon
   
-  cols_to_sum <- c("intersect_population", "intersect_income", new_colnames)
+  pop_cols <- paste0("intersect_", c("population", "men", "women"))
+  
+  cols_to_sum <- c(pop_cols, "intersect_income", new_colnames)
   final_colnames <- sub("intersect_", "", cols_to_sum)
+  final_colnames[1:4] <- c("pop_total", "homens", "mulheres", "renda_total")
   
   hexs_with_data <- intersections[
     ,
@@ -386,8 +384,8 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   )
   
   data.table::setDT(full_hexs_with_data)
-  full_hexs_with_data[is.na(population), (data_cols) := 0]
-  full_hexs_with_data[, income_per_capita := income / population]
+  full_hexs_with_data[is.na(pop_total), (data_cols) := 0]
+  full_hexs_with_data[, renda_per_capita := renda_total / pop_total]
   
   full_hexs_with_data <- sf::st_sf(full_hexs_with_data)
   
@@ -395,16 +393,13 @@ aggregate_data_to_hexagons <- function(urban_concentration,
   
   project_dir <- "../../data/acesso_oport"
   
-  urban_conc_hexs_dir <- file.path(project_dir, "hex_conc_urbanas")
-  if (!dir.exists(urban_conc_hexs_dir)) dir.create(urban_conc_hexs_dir)
+  pop_units_hexs_dir <- file.path(project_dir, "hex_ibge")
+  if (!dir.exists(pop_units_hexs_dir)) dir.create(pop_units_hexs_dir)
   
-  res_dir <- file.path(urban_conc_hexs_dir, paste0("res_", res))
+  res_dir <- file.path(pop_units_hexs_dir, paste0("res_", res))
   if (!dir.exists(res_dir)) dir.create(res_dir)
   
-  basename <- paste0(
-    treat_name(urban_concentration$name_urban_concentration),
-    ".rds"
-  )
+  basename <- paste0(treat_name(pop_unit$name_pop_unit), ".rds")
   
   path <- file.path(res_dir, basename)
   saveRDS(full_hexs_with_data, path)

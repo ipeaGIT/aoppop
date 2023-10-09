@@ -99,45 +99,21 @@ merge_pop_units <- function(concs, arrangs) {
 }
 
 # census_tracts <- tar_read(census_tracts)
-# urban_concentrations <- tar_read(urban_concentrations)
-subset_urban_conc_tracts <- function(census_tracts, urban_concentrations) {
-  # usign a slightly larger buffer just to make sure that all census tracts that
+# pop_units <- tar_read(pop_units)
+subset_pop_units_tracts <- function(census_tracts, pop_units) {
+  # using a slightly larger buffer just to make sure that all census tracts that
   # intersect with a grid cell are included, otherwise we would lose information
   # when reaggregating data from the tracts to the grid
   intersections <- sf::st_intersects(
     census_tracts,
-    sf::st_buffer(urban_concentrations, 3000) 
+    sf::st_buffer(sf::st_union(pop_units), 3000)
   )
-  does_intersect <- lengths(intersections) > 0
+  do_intersect <- lengths(intersections) > 0
   
-  filtered_tracts <- census_tracts[does_intersect, ]
+  filtered_tracts <- census_tracts[do_intersect, ]
   
   return(filtered_tracts)
 }
-
-# res <- tar_read(h3_resolutions)[1]
-# urban_concentration <- tar_read(individual_urban_concentrations)[1, ]
-create_hex_grids <- function(res, urban_concentration) {
-  urban_conc_cells <- h3jsr::polygon_to_cells(urban_concentration, res)
-  urban_conc_grid <- h3jsr::cell_to_polygon(urban_conc_cells, simple = FALSE)
-  
-  # some adjacent urban concentrations (Rio de Janeiro and Angra, for example)
-  # may end up sharing some cells is common. in order to prevent the same cell
-  # from appearing twice in our final output, we keep only cells whose centroids
-  # are within the polygon.
-  # suppressed warning:
-  #  - st_centroid assumes attributes are constant over geometries
-  
-  grid_centroids <- suppressWarnings(sf::st_centroid(urban_conc_grid))
-  
-  contained_cells <- sf::st_within(grid_centroids, urban_concentration)
-  within_concentration <- lengths(contained_cells) > 0
-  
-  urban_conc_grid <- urban_conc_grid[within_concentration, ]
-  
-  return(urban_conc_grid)
-}
-
 
 # res <- tar_read(h3_resolutions)[1]
 # pop_unit <- tar_read(pop_units)[1, ]
