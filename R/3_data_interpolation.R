@@ -407,15 +407,6 @@ aggregate_data_to_hexagons <- function(pop_unit,
   return(path)
 }
 
-treat_name <- function(urban_conc) {
-  urban_conc <- tolower(urban_conc)
-  urban_conc <- gsub("\\´", "'", urban_conc)
-  urban_conc <- gsub("\\/", "_", urban_conc)
-  urban_conc <- gsub(" ", "_", urban_conc)
-  urban_conc <- iconv(urban_conc, from = "UTF-8", to = "ASCII//TRANSLIT")
-  return(urban_conc)
-}
-
 parallel_intersection <- function(x, y, n_cores) {
   if (n_cores == 1) {
     batch_indices = list(1:nrow(x))

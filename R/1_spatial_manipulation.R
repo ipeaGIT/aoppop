@@ -58,12 +58,13 @@ download_immediate_regions <- function() {
   )
   immediate_regions <- sf::st_make_valid(immediate_regions)
   
-  return(pop_arrangements)
+  return(immediate_regions)
 }
 
 # concs <- tar_read(urban_concentrations)
 # arrangs <- tar_read(pop_arrangements)
-merge_pop_units <- function(concs, arrangs) {
+# regs <- tar_read(immediate_regions)
+merge_pop_units <- function(concs, arrangs, regs) {
   # a population arrangement is a group of 2+ cities in which there is a strong
   # integration of population groups, either due to commuting flows that cross
   # different cities or due to the contiguity of their urban areas. these
@@ -88,6 +89,7 @@ merge_pop_units <- function(concs, arrangs) {
   
   all_concs <- concs
   names(all_concs) <- c("code_pop_unit", "name_pop_unit", "geom")
+  all_concs$type <- "urban_concentration"
   
   small_arrangs <- arrangs[arrangs$population < 100000, ]
   small_arrangs <- dplyr::select(
@@ -95,6 +97,7 @@ merge_pop_units <- function(concs, arrangs) {
     code_pop_unit = code_pop_arrangement,
     name_pop_unit = name_pop_arrangement
   )
+  small_arrangs$type <- "population_arrangement"
   small_arrangs <- subset(
     small_arrangs,
     ! code_pop_unit %in% c(5006606, 4317103)
@@ -102,10 +105,103 @@ merge_pop_units <- function(concs, arrangs) {
   
   pop_units <- rbind(all_concs, small_arrangs)
   
+  # in addition, we also bind to pop_units the portions of the immediate regions
+  # not covered by the urban concentrations and population arrangements.
+  #
+  # the geometries of the immediate areas do not perfectly overlap with the
+  # geometries of urban concentrations and population arrangements, so we have
+  # some "crumbs" in the output. in fact, some of "final immediate regions"
+  # (after calculating the difference) are composed only of crumbs which
+  # account for less than 1% of the region's original area. we calculate the
+  # areas before and after the operation to remove such "crumb regions".
+  #
+  # we also extract only the polygons from the difference, as the operation may
+  # result in points and linestrings as well.
+  
+  regs$area_before <- as.numeric(sf::st_area(regs))
+  
+  unified_pop_units <- sf::st_union(pop_units)
+  regs <- sf::st_difference(regs, unified_pop_units)
+  
+  regs <- sf::st_collection_extract(regs, "POLYGON")
+  regs <- sf::st_make_valid(regs)
+  
+  regs$area_after <- as.numeric(sf::st_area(regs))
+  regs$share_of_orig_area <- regs$area_after / regs$area_before
+  
+  regs <- subset(regs, share_of_orig_area >= 0.01)
+  
+  # many (most?) immediate regions contain lots and lots of crumbs, which may
+  # lead to hexagonal grids with weirdly distributed hexagons. we remove very
+  # small crumbs (whose areas are smaller than a h3 res 9 cell) in order to
+  # mitigate this behavior.
+  
+  treated_geoms <- vector("list", length = nrow(regs))
+  for (i in 1:nrow(regs)) {
+    treated_geoms[[i]] <- remove_small_crumbs(regs$geom[i])
+  }
+  treated_geoms_sf <- do.call(rbind, treated_geoms)
+  
+  regs <- sf::st_set_geometry(regs, sf::st_as_sfc(treated_geoms_sf))
+  
+  regs <- dplyr::select(
+    regs,
+    code_pop_unit = code_immediate,
+    name_pop_unit = name_immediate
+  )  
+  regs$name_pop_unit <- paste0("Região Imediata de ", regs$name_pop_unit)
+  regs$type <- "immediate_region"
+  
+  pop_units <- rbind(pop_units, regs)
+  
   pop_units <- pop_units[order(pop_units$code_pop_unit), ]
+  pop_units$treated_name <- treat_name(pop_units)
   pop_units$tar_group <- 1:nrow(pop_units)
   
   return(pop_units)
+}
+
+remove_small_crumbs <- function(geom) {
+  exploded_geom <- sf::st_cast(geom, "POLYGON")
+  areas <- as.numeric(sf::st_area(exploded_geom))
+  too_small <- areas < 105332
+  
+  filtered_exploded_geom <- exploded_geom[!too_small]
+  filtered_geom <- sf::st_union(filtered_exploded_geom)
+  filtered_geom_sf <- sf::st_sf(filtered_geom)
+  
+  return(filtered_geom_sf)
+}
+
+treat_name <- function(pop_units) {
+  treated <- tolower(pop_units$name_pop_unit)
+  treated <- gsub("\\´", "'", treated)
+  treated <- iconv(treated, from = "UTF-8", to = "ASCII//TRANSLIT")
+  
+  treated <- gsub("regiao imediata de ", "", treated)
+  
+  is_international <- grepl("\\/brasil", treated)
+  international <- treated[is_international]
+  international <- strsplit(international, " - ")
+  brazilian_city <- vapply(
+    international,
+    FUN.VALUE = character(1),
+    FUN = function(x) x[grepl("\\/brasil$", x)]
+  )
+  brazilian_city <- sub("internacional de ", "", brazilian_city)
+  brazilian_city <- sub("\\/brasil", "", brazilian_city)
+  treated[is_international] <- brazilian_city
+  
+  treated <- gsub("\\/[a-z]{2}$", "", treated)
+  treated <- gsub("\\/[a-z]{2} ", " ", treated)
+  
+  treated <- gsub("\\/", "_", treated)
+  treated <- gsub(" ", "_", treated)
+  
+  is_immediate_region <- pop_units$type == "immediate_region"
+  treated[is_immediate_region] <- paste0("ri_", treated[is_immediate_region])
+  
+  return(treated)
 }
 
 # census_tracts <- tar_read(census_tracts)
@@ -133,8 +229,55 @@ create_hex_grid <- function(res, pop_unit) {
   pop_unit_wgs <- sf::st_transform(pop_unit, 4326)
   pop_urban_cells <- h3jsr::polygon_to_cells(pop_unit_wgs, res)
   
-  pop_urban_grid <- h3jsr::cell_to_polygon(pop_urban_cells, simple = FALSE)
+  # cell_to_polygon() may error if we send too many h3 addresses to it (some of
+  # our biggest pop_units may be covered by several thousands or close to 1/2
+  # million hexs). so if it errors, we split the cell list in two and merge the
+  # outputs
+  
+  if (res == 9 && as.numeric(sf::st_area(pop_unit)) > 100000000000) {
+    skip_first_try <- TRUE
+  } else {
+    pop_urban_grid <- tryCatch(
+      h3jsr::cell_to_polygon(pop_urban_cells, simple = FALSE),
+      error = function(cnd) cnd
+    )
+  }
+  
+  if (exists("skip_first_try") || inherits(pop_urban_grid, "error")) {
+    cells <- pop_urban_cells[[1]]
+    n_cells <- lengths(pop_urban_cells)
+    
+    n_batches <- ceiling(n_cells / 800000)
+    
+    batch_indices <- if (n_batches == 1) {
+      1:n_cells
+    } else {
+      indices_cuts <- cut(1:n_cells, breaks = n_batches)
+      split(1:n_cells, indices_cuts)
+    }
+    
+    cell_groups <- lapply(batch_indices, function(is) cells[is])
+    cell_groups_sf <- lapply(
+      cell_groups,
+      function(hexs) h3jsr::cell_to_polygon(hexs, simple = FALSE)
+    )
+    
+    pop_urban_grid <- do.call(rbind, cell_groups_sf)
+  }
+  
   pop_urban_grid <- sf::st_transform(pop_urban_grid, original_crs)
   
-  return(pop_urban_grid)
+  hex_dir <- file.path(
+    "../../data/acesso_oport_v2/hex_grids_polys",
+    paste0("res_", res),
+    "2010"
+  )
+  if (!dir.exists(hex_dir)) dir.create(hex_dir, recursive = TRUE)
+  
+  basename <- paste0(pop_unit$code_pop_unit, "_", pop_unit$treated_name, ".rds")
+  filepath <- file.path(hex_dir, basename)
+  
+  saveRDS(pop_urban_grid, filepath)
+  
+  return(filepath)
 }
