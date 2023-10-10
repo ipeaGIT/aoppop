@@ -63,8 +63,7 @@ download_immediate_regions <- function() {
 
 # concs <- tar_read(urban_concentrations)
 # arrangs <- tar_read(pop_arrangements)
-# regs <- tar_read(immediate_regions)
-merge_pop_units <- function(concs, arrangs, regs) {
+merge_pop_units <- function(concs, arrangs) {
   # a population arrangement is a group of 2+ cities in which there is a strong
   # integration of population groups, either due to commuting flows that cross
   # different cities or due to the contiguity of their urban areas. these
@@ -104,55 +103,6 @@ merge_pop_units <- function(concs, arrangs, regs) {
   )
   
   pop_units <- rbind(all_concs, small_arrangs)
-  
-  # in addition, we also bind to pop_units the portions of the immediate regions
-  # not covered by the urban concentrations and population arrangements.
-  #
-  # the geometries of the immediate areas do not perfectly overlap with the
-  # geometries of urban concentrations and population arrangements, so we have
-  # some "crumbs" in the output. in fact, some of "final immediate regions"
-  # (after calculating the difference) are composed only of crumbs which
-  # account for less than 1% of the region's original area. we calculate the
-  # areas before and after the operation to remove such "crumb regions".
-  #
-  # we also extract only the polygons from the difference, as the operation may
-  # result in points and linestrings as well.
-  
-  regs$area_before <- as.numeric(sf::st_area(regs))
-  
-  unified_pop_units <- sf::st_union(pop_units)
-  regs <- sf::st_difference(regs, unified_pop_units)
-  
-  regs <- sf::st_collection_extract(regs, "POLYGON")
-  regs <- sf::st_make_valid(regs)
-  
-  regs$area_after <- as.numeric(sf::st_area(regs))
-  regs$share_of_orig_area <- regs$area_after / regs$area_before
-  
-  regs <- subset(regs, share_of_orig_area >= 0.01)
-  
-  # many (most?) immediate regions contain lots and lots of crumbs, which may
-  # lead to hexagonal grids with weirdly distributed hexagons. we remove very
-  # small crumbs (whose areas are smaller than a h3 res 9 cell) in order to
-  # mitigate this behavior.
-  
-  treated_geoms <- vector("list", length = nrow(regs))
-  for (i in 1:nrow(regs)) {
-    treated_geoms[[i]] <- remove_small_crumbs(regs$geom[i])
-  }
-  treated_geoms_sf <- do.call(rbind, treated_geoms)
-  
-  regs <- sf::st_set_geometry(regs, sf::st_as_sfc(treated_geoms_sf))
-  
-  regs <- dplyr::select(
-    regs,
-    code_pop_unit = code_immediate,
-    name_pop_unit = name_immediate
-  )  
-  regs$name_pop_unit <- paste0("Região Imediata de ", regs$name_pop_unit)
-  regs$type <- "immediate_region"
-  
-  pop_units <- rbind(pop_units, regs)
   
   pop_units <- pop_units[order(pop_units$code_pop_unit), ]
   pop_units$treated_name <- treat_name(pop_units)

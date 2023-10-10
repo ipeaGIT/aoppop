@@ -27,10 +27,9 @@ list(
   tar_target(census_statistical_grid, download_statistical_grid()),
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(pop_arrangements, download_pop_arrangements()),
-  tar_target(immediate_regions, download_immediate_regions()),
   tar_target(
     pop_units,
-    merge_pop_units(urban_concentrations, pop_arrangements, immediate_regions),
+    merge_pop_units(urban_concentrations, pop_arrangements),
     iteration = "group"
   ),
   tar_target(
