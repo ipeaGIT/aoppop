@@ -182,14 +182,16 @@ bind_stat_grids <- function(large_grids, small_grids, large_grids_indices) {
 
 # pop_unit <- subset(tar_read(pop_units), tar_group == 1)
 # stat_grid <- tar_read(stat_grids_with_data)[[1]]
-# hex_grid <- tar_read(hex_grids, branches = 1)[[1]]
+# hex_grid_path <- tar_read(hex_grids, branches = 1)[[1]]
 # res <- 7
 # manual_parallelization <- FALSE
 aggregate_data_to_hexagons <- function(pop_unit,
                                        stat_grid,
-                                       hex_grid,
+                                       hex_grid_path,
                                        res,
                                        manual_parallelization) {
+  hex_grid <- readRDS(hex_grid_path)
+  
   # filter out hexagons that don't intersect with the grid cells, otherwise they
   # would significantly slow down the intersection process
   
@@ -391,20 +393,19 @@ aggregate_data_to_hexagons <- function(pop_unit,
   
   # save object as RDS and return the path
   
-  project_dir <- "../../data/acesso_oport"
+  hex_dir <- file.path(
+    "../../data/acesso_oport_v2/hex_grids_with_data",
+    paste0("res_", res),
+    "2010"
+  )
+  if (!dir.exists(hex_dir)) dir.create(hex_dir, recursive = TRUE)
   
-  pop_units_hexs_dir <- file.path(project_dir, "hex_ibge")
-  if (!dir.exists(pop_units_hexs_dir)) dir.create(pop_units_hexs_dir)
+  basename <- paste0(pop_unit$code_pop_unit, "_", pop_unit$treated_name, ".rds")
+  filepath <- file.path(hex_dir, basename)
   
-  res_dir <- file.path(pop_units_hexs_dir, paste0("res_", res))
-  if (!dir.exists(res_dir)) dir.create(res_dir)
+  saveRDS(full_hexs_with_data, filepath)
   
-  basename <- paste0(treat_name(pop_unit$name_pop_unit), ".rds")
-  
-  path <- file.path(res_dir, basename)
-  saveRDS(full_hexs_with_data, path)
-  
-  return(path)
+  return(filepath)
 }
 
 parallel_intersection <- function(x, y, n_cores) {

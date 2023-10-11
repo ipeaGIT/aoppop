@@ -138,7 +138,7 @@ prepare_census_data <- function() {
   return(census_data[])
 }
 
-# census_tracts <- tar_read(census_tracts)
+# census_tracts <- tar_read(pop_units_tracts)
 # census_data <- tar_read(census_data)
 merge_census_tracts_data <- function(census_tracts, census_data) {
   tracts_with_data <- dplyr::left_join(
