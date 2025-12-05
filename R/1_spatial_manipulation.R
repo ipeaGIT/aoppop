@@ -1,7 +1,7 @@
-download_census_tracts <- function() {
+download_census_tracts <- function(yyyy) {
   census_tracts <- geobr::read_census_tract(
     "all",
-    year = 2010,
+    year = yyyy,
     simplified = FALSE,
     showProgress = getOption("TARGETS_SHOW_PROGRESS")
   )
@@ -11,10 +11,10 @@ download_census_tracts <- function() {
   return(census_tracts)
 }
 
-download_statistical_grid <- function() {
+download_statistical_grid <- function(yyyy) {
   statistical_grid <- geobr::read_statistical_grid(
     "all",
-    year = 2010,
+    year = yyyy,
     showProgress = getOption("TARGETS_SHOW_PROGRESS")
   )
   

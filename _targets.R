@@ -1,6 +1,6 @@
 options(
   TARGETS_SHOW_PROGRESS = FALSE,
-  TARGETS_N_CORES = 35
+  TARGETS_N_CORES = 10
 )
 
 suppressPackageStartupMessages({
@@ -21,10 +21,21 @@ tar_option_set(workspace_on_error = TRUE)
 
 list(
   tar_target(h3_resolutions, 7:9),
+  tar_target(years, c(2010)), # add 2022 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   # spatial manipulation
-  tar_target(census_tracts, download_census_tracts()),
-  tar_target(census_statistical_grid, download_statistical_grid()),
+  tar_target(
+    name = census_tracts, 
+    command = download_census_tracts(years),
+    pattern = map(years)
+    ),
+  
+  tar_target(
+    name = census_statistical_grid, 
+    command = download_statistical_grid(years), 
+    pattern = map(years)
+    ),
+    
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(pop_arrangements, download_pop_arrangements()),
   tar_target(
@@ -48,7 +59,12 @@ list(
 
 
   # data processing
-  tar_target(census_data, prepare_census_data()),
+  tar_target(
+    name = census_data, 
+    command = prepare_census_data(years), 
+    pattern = map(years)
+    ),
+  
   tar_target(
     tracts_with_data,
     merge_census_tracts_data(pop_units_tracts, census_data)
