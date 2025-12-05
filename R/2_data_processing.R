@@ -123,7 +123,8 @@ prepare_census_data <- function(yyyy) {
   # raw tables), which we substitute by 0s. we collect the dataframe because
   # this is easier to do with data.table
   
-  census_data <- dplyr::collect(census_data)
+  census_data <- dplyr::collect(census_data) |> 
+    data.table::setDT()
   
   int_cols <- setdiff(
     names(census_data),
