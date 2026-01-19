@@ -1,6 +1,7 @@
 options(
-  TARGETS_SHOW_PROGRESS = FALSE,
-  TARGETS_N_CORES = 10
+  TARGETS_SHOW_PROGRESS = TRUE,
+  TARGETS_N_CORES = 10,
+  timeout = 100000
 )
 
 suppressPackageStartupMessages({
@@ -9,33 +10,31 @@ suppressPackageStartupMessages({
   library(sf)
 })
 
-source("R/1_spatial_manipulation.R", encoding = "UTF-8")
-source("R/2_data_processing.R", encoding = "UTF-8")
-source("R/3_data_interpolation.R", encoding = "UTF-8")
+tar_source()
 
-if (!interactive()) {
-  future::plan(future.callr::callr, workers = getOption("TARGETS_N_CORES"))
-}
+# if (!interactive()) {
+#   future::plan(future.callr::callr, workers = getOption("TARGETS_N_CORES"))
+# }
 
 tar_option_set(workspace_on_error = TRUE)
 
 list(
-  tar_target(h3_resolutions, 7:9),
-  tar_target(years, c(2010)), # add 2022 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  
+  tar_target(h3_res, 7:9),
+  tar_target(years, c(2022)), # add 2022 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   # spatial manipulation
   tar_target(
-    name = census_tracts, 
-    command = download_census_tracts(years),
-    pattern = map(years)
-    ),
-  
+    census_tracts,
+    download_census_tracts(years),
+    map(years),
+    deployment = "main"
+  ),
   tar_target(
-    name = census_statistical_grid, 
-    command = download_statistical_grid(years), 
+    name = census_statistical_grid,
+    command = download_statistical_grid(years),
     pattern = map(years)
-    ),
-    
+  ),
+
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(pop_arrangements, download_pop_arrangements()),
   tar_target(
@@ -57,14 +56,13 @@ list(
     subset_pop_units_tracts(census_tracts, pop_units)
   ),
 
-
   # data processing
   tar_target(
-    name = census_data, 
-    command = prepare_census_data(years), 
+    name = census_data,
+    command = prepare_census_data(years),
     pattern = map(years)
-    ),
-  
+  ),
+
   tar_target(
     tracts_with_data,
     merge_census_tracts_data(pop_units_tracts, census_data)
@@ -187,7 +185,7 @@ list(
     small_pop_units_res_7,
     {
       units <- pop_units
-      units <- units[! units$tar_group %in% large_indices_for_res_7, ]
+      units <- units[!units$tar_group %in% large_indices_for_res_7, ]
       units$tar_group <- seq.int(1, nrow(units))
       units <- sf::st_drop_geometry(units)
       units
@@ -272,7 +270,7 @@ list(
     small_pop_units_res_8,
     {
       units <- pop_units
-      units <- units[! units$tar_group %in% large_indices_for_res_8, ]
+      units <- units[!units$tar_group %in% large_indices_for_res_8, ]
       units$tar_group <- seq.int(1, nrow(units))
       units <- sf::st_drop_geometry(units)
       units
@@ -357,7 +355,7 @@ list(
     small_pop_units_res_9,
     {
       units <- pop_units
-      units <- units[! units$tar_group %in% large_indices_for_res_9, ]
+      units <- units[!units$tar_group %in% large_indices_for_res_9, ]
       units$tar_group <- seq.int(1, nrow(units))
       units <- sf::st_drop_geometry(units)
       units
