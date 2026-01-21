@@ -20,18 +20,27 @@ download_census_tracts <- function(year) {
   return(census_tracts)
 }
 
-download_statistical_grid <- function(yyyy) {
-  statistical_grid <- geobr::read_statistical_grid(
-    "all",
-    year = yyyy,
-    showProgress = getOption("TARGETS_SHOW_PROGRESS")
-  )
+# year <- tar_read(years)[1]
+download_statistical_grid <- function(year) {
+  if (year == 2010) {
+    statistical_grid <- NULL
 
-  statistical_grid <- statistical_grid[,
-    c("ID_UNICO", "MASC", "FEM", "POP", "DOM_OCU", "geom")
-  ]
+    while (is.null(statistical_grid)) {
+      statistical_grid <- geobr::read_statistical_grid(
+        "all",
+        year = year,
+        showProgress = getOption("TARGETS_SHOW_PROGRESS")
+      )
+    }
 
-  return(statistical_grid)
+    statistical_grid <- statistical_grid[,
+      c("ID_UNICO", "MASC", "FEM", "POP", "DOM_OCU", "geom")
+    ]
+
+    return(statistical_grid)
+  } else {
+    return(NULL)
+  }
 }
 
 download_urban_concentrations <- function() {
@@ -52,7 +61,7 @@ download_pop_arrangements <- function() {
   pop_arrangements <- dplyr::summarize(
     pop_arrangements,
     geom = sf::st_union(geom),
-    population = sum(pop_total_2010),
+    pop_total_2010 = sum(pop_total_2010),
     .by = c(code_pop_arrangement, name_pop_arrangement)
   )
 
@@ -98,7 +107,7 @@ merge_pop_units <- function(concs, arrangs) {
   names(all_concs) <- c("code_pop_unit", "name_pop_unit", "geom")
   all_concs$type <- "urban_concentration"
 
-  small_arrangs <- arrangs[arrangs$population < 100000, ]
+  small_arrangs <- arrangs[arrangs$pop_total_2010 < 100000, ]
   small_arrangs <- dplyr::select(
     small_arrangs,
     code_pop_unit = code_pop_arrangement,
@@ -114,7 +123,7 @@ merge_pop_units <- function(concs, arrangs) {
 
   pop_units <- pop_units[order(pop_units$code_pop_unit), ]
   pop_units$treated_name <- treat_name(pop_units)
-  pop_units$tar_group <- 1:nrow(pop_units)
+  pop_units$tar_group <- seq_len(nrow(pop_units))
 
   return(pop_units)
 }
@@ -146,7 +155,7 @@ treat_name <- function(pop_units) {
     FUN.VALUE = character(1),
     FUN = function(x) x[grepl("\\/brasil$", x)]
   )
-  brazilian_city <- sub("internacional de ", "", brazilian_city)
+  brazilian_city <- sub("internacional de ", "", brazilian_city, fixed = TRUE)
   brazilian_city <- sub("\\/brasil", "", brazilian_city)
   treated[is_international] <- brazilian_city
 
@@ -154,7 +163,7 @@ treat_name <- function(pop_units) {
   treated <- gsub("\\/[a-z]{2} ", " ", treated)
 
   treated <- gsub("\\/", "_", treated)
-  treated <- gsub(" ", "_", treated)
+  treated <- gsub(" ", "_", treated, fixed = TRUE)
 
   is_immediate_region <- pop_units$type == "immediate_region"
   treated[is_immediate_region] <- paste0("ri_", treated[is_immediate_region])
@@ -162,7 +171,7 @@ treat_name <- function(pop_units) {
   return(treated)
 }
 
-# census_tracts <- tar_read(census_tracts)
+# census_tracts <- tar_read(census_tracts)[[1]]
 # pop_units <- tar_read(pop_units)
 subset_pop_units_tracts <- function(census_tracts, pop_units) {
   # using a slightly larger buffer just to make sure that all census tracts that
@@ -179,65 +188,45 @@ subset_pop_units_tracts <- function(census_tracts, pop_units) {
   return(filtered_tracts)
 }
 
-# res <- tar_read(h3_resolutions)[1]
-# pop_unit <- tar_read(pop_units)[1, ]
+# res <- tar_read(h3_res)[1]
+# pop_unit <- tar_read(pop_units)[23, ]
 create_hex_grid <- function(res, pop_unit) {
+  cli::cli_inform(
+    "Creating hex grid at {.val res {res}} for {.val {pop_unit$treated_name}}"
+  )
+
   original_crs <- sf::st_crs(pop_unit)
 
   pop_unit_wgs <- sf::st_transform(pop_unit, 4326)
-  pop_urban_cells <- h3jsr::polygon_to_cells(pop_unit_wgs, res)
+  pop_urban_cells <- h3o::sfc_to_cells(sf::st_geometry(pop_unit_wgs), res)[[1]]
 
-  # cell_to_polygon() may error if we send too many h3 addresses to it (some of
-  # our biggest pop_units may be covered by several thousands or close to 1/2
-  # million hexs). so if it errors, we split the cell list in two and merge the
-  # outputs
-
-  if (res == 9 && as.numeric(sf::st_area(pop_unit)) > 100000000000) {
-    skip_first_try <- TRUE
-  } else {
-    pop_urban_grid <- tryCatch(
-      h3jsr::cell_to_polygon(pop_urban_cells, simple = FALSE),
-      error = function(cnd) cnd
-    )
-  }
-
-  if (exists("skip_first_try") || inherits(pop_urban_grid, "error")) {
-    cells <- pop_urban_cells[[1]]
-    n_cells <- lengths(pop_urban_cells)
-
-    n_batches <- ceiling(n_cells / 800000)
-
-    batch_indices <- if (n_batches == 1) {
-      1:n_cells
-    } else {
-      indices_cuts <- cut(1:n_cells, breaks = n_batches)
-      split(1:n_cells, indices_cuts)
-    }
-
-    cell_groups <- lapply(batch_indices, function(is) cells[is])
-    cell_groups_sf <- lapply(
-      cell_groups,
-      function(hexs) h3jsr::cell_to_polygon(hexs, simple = FALSE)
-    )
-
-    pop_urban_grid <- do.call(rbind, cell_groups_sf)
-  }
+  pop_urban_grid <- sf::st_sf(
+    h3_address = as.character(pop_urban_cells),
+    geometry = sf::st_as_sfc(pop_urban_cells)
+  )
 
   pop_urban_grid <- sf::st_transform(pop_urban_grid, original_crs)
 
+  # TODO: REPENSAR ESSE CAMINHO AQUI - TIRAR O 2010 HARDCODED. MAS BOTAR O QUE?
+  # 2022 NÃO EXISTE AINDA (NA VERDADE, AS POP_UNITS SÃO DE 2015)
+
   hex_dir <- file.path(
-    "../../data/acesso_oport_v2/hex_grids_polys",
-    paste0("res_", res),
+    Sys.getenv("USERS_DATA_PATH"),
+    "Proj_acess_oport/data/acesso_oport_v2/hex_grids_polys",
+    glue::glue("res_{res}"),
     "2010"
   )
+
   if (!dir.exists(hex_dir)) {
-    dir.create(hex_dir, recursive = TRUE)
+    dir.create(hex_dir)
   }
 
-  basename <- paste0(pop_unit$code_pop_unit, "_", pop_unit$treated_name, ".rds")
+  basename <- glue::glue(
+    "{pop_unit$code_pop_unit}_{pop_unit$treated_name}.parquet"
+  )
   filepath <- file.path(hex_dir, basename)
 
-  saveRDS(pop_urban_grid, filepath)
+  arrow::write_parquet(pop_urban_grid, filepath)
 
   return(filepath)
 }
