@@ -1,6 +1,6 @@
 # year <- tar_read(years)[1]
 download_census_tracts <- function(year) {
-  cli::cli_inform("Baixando setores censitários")
+  cli::cli_inform("Baixando setores censitários do ano de {.val {year}}")
 
   census_tracts <- NULL
 
@@ -12,6 +12,15 @@ download_census_tracts <- function(year) {
       showProgress = getOption("TARGETS_SHOW_PROGRESS")
     )
   }
+
+  if (year == 2022) {
+    census_tracts <- dplyr::mutate(
+      census_tracts,
+      code_tract = as.character(code_tract)
+    )
+  }
+
+  census_tracts <- dplyr::select(census_tracts, c(code_tract, geom))
 
   cli::cli_inform("Corrigindo eventuais problemas topológicos")
 

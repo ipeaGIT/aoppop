@@ -69,29 +69,30 @@ list(
     subset_pop_units_tracts(census_tracts, pop_units),
     pattern = map(census_tracts),
     iteration = "list"
-  )
-  #,
+  ),
 
   # data processing
 
-  # tar_target(
-  #   name = census_data,
-  #   command = prepare_census_data(years),
-  #   pattern = map(years)
-  # ),
-
-  # tar_target(
-  #   tracts_with_data,
-  #   merge_census_tracts_data(pop_units_tracts, census_data)
-  # ),
-  # tar_target(
-  #   individual_tracts_with_data,
-  #   filter_tracts_with_data(tracts_with_data, pop_units),
-  #   pattern = map(pop_units),
-  #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list"
-  # ),
+  tar_target(
+    name = census_data,
+    command = prepare_census_data(years),
+    pattern = map(years),
+    iteration = "list"
+  ),
+  tar_target(
+    tracts_with_data,
+    merge_census_tracts_data(pop_units_tracts, census_data),
+    pattern = map(pop_units_tracts, census_data),
+    iteration = "list"
+  ),
+  tar_target(
+    individual_tracts_with_data,
+    filter_tracts_with_data(years, tracts_with_data, pop_units),
+    pattern = cross(map(years, tracts_with_data), pop_units),
+    iteration = "list",
+    deployment = "main"
+  )
+  #,
   # tar_target(
   #   statistical_grid_with_pop,
   #   subset(census_statistical_grid, POP > 0)
