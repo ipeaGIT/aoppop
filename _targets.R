@@ -22,12 +22,13 @@ tar_option_set(
   ),
   resources = tar_resources(
     crew = tar_resources_crew(controller = "max_paralelo")
-  )
+  ),
+  storage = "worker",
+  retrieval = "worker",
+  workspace_on_error = TRUE
 )
 
 tar_source()
-
-tar_option_set(workspace_on_error = TRUE)
 
 list(
   tar_target(h3_res, 7:9),
@@ -89,8 +90,7 @@ list(
     individual_tracts_with_data,
     filter_tracts_with_data(years, tracts_with_data, pop_units),
     pattern = cross(map(years, tracts_with_data), pop_units),
-    iteration = "list",
-    deployment = "main"
+    iteration = "list"
   )
   #,
   # tar_target(

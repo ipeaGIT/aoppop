@@ -256,10 +256,6 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
   # after all this cropping, the final result may contain some linestrings, so
   # we make sure the output consists only of polygons by using
   # st_collection_extract().
-  #
-  # FIXME: worry about this warning?
-  #   - although coordinates are longitude/latitude, st_difference assumes that
-  #     they are planar
 
   individual_tracts <- sf::st_transform(individual_tracts, 5880)
 
@@ -269,56 +265,60 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
   )
 
   if (inherits(individual_tracts_or_error, "error")) {
+    stop("chegou até aqui")
+
     individual_tracts <- sf::st_buffer(individual_tracts, 0)
+    individual_tracts <- sf::st_difference(individual_tracts)
 
-    individual_tracts_or_error <- tryCatch(
-      sf::st_difference(individual_tracts),
-      error = function(cnd) cnd
-    )
+    # individual_tracts_or_error <- tryCatch(
+    #   sf::st_difference(individual_tracts),
+    #   error = function(cnd) cnd
+    # )
   } else {
-    individual_tracts <- sf::st_collection_extract(
-      individual_tracts_or_error,
-      "POLYGON"
-    )
-    individual_tracts <- sf::st_make_valid(individual_tracts)
-
-    return(individual_tracts)
+    individual_tracts <- individual_tracts_or_error
   }
 
-  if (inherist(individual_tracts_or_error, "error")) {
-    stop(
-      glue::glue(
-        "erro ",
-        "cod:{unique(individual_tracts$cod_muni)} ",
-        "nome:{enderecobr::padronizar_municipios(unique(individual_tracts$cod_muni))}"
-      )
-    )
-  }
-
-  while (inherits(individual_tracts_or_error, "error")) {
-    split_error_message <- strsplit(individual_tracts_or_error$message, " ")
-    bad_point_x <- as.numeric(split_error_message[[1]][6])
-    bad_point_y <- as.numeric(split_error_message[[1]][7])
-    bad_point <- sf::st_sfc(
-      sf::st_point(c(bad_point_x, bad_point_y)),
-      crs = sf::st_crs(individual_tracts)
-    )
-
-    individual_tracts <- pontual_fix(individual_tracts, bad_point)
-
-    individual_tracts_or_error <- tryCatch(
-      sf::st_difference(individual_tracts),
-      error = function(cnd) cnd
-    )
-  }
-
-  individual_tracts <- sf::st_collection_extract(
-    individual_tracts_or_error,
-    "POLYGON"
-  )
+  individual_tracts <- sf::st_collection_extract(individual_tracts, "POLYGON")
   individual_tracts <- sf::st_make_valid(individual_tracts)
 
+  individual_tracts <- sf::st_transform(individual_tracts, 4674)
+
   return(individual_tracts)
+
+  # if (inherist(individual_tracts_or_error, "error")) {
+  #   stop(
+  #     glue::glue(
+  #       "erro ",
+  #       "cod:{unique(individual_tracts$cod_muni)} ",
+  #       "nome:{enderecobr::padronizar_municipios(unique(individual_tracts$cod_muni))}"
+  #     )
+  #   )
+  # }
+
+  # while (inherits(individual_tracts_or_error, "error")) {
+  #   split_error_message <- strsplit(individual_tracts_or_error$message, " ")
+  #   bad_point_x <- as.numeric(split_error_message[[1]][6])
+  #   bad_point_y <- as.numeric(split_error_message[[1]][7])
+  #   bad_point <- sf::st_sfc(
+  #     sf::st_point(c(bad_point_x, bad_point_y)),
+  #     crs = sf::st_crs(individual_tracts)
+  #   )
+
+  #   individual_tracts <- pontual_fix(individual_tracts, bad_point)
+
+  #   individual_tracts_or_error <- tryCatch(
+  #     sf::st_difference(individual_tracts),
+  #     error = function(cnd) cnd
+  #   )
+  # }
+
+  # individual_tracts <- sf::st_collection_extract(
+  #   individual_tracts_or_error,
+  #   "POLYGON"
+  # )
+  # individual_tracts <- sf::st_make_valid(individual_tracts)
+
+  # return(individual_tracts)
 }
 
 pontual_fix <- function(x, point) {
