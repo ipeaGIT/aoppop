@@ -78,6 +78,7 @@ prepare_census_data <- function(year) {
   } else if (year == 2022) {
     # census variables:
     #   - V0001 -> total population count
+    #   - domicilio01_V00005:domicilio01_V00006 -> population living in private households
     #   - raca_V01317:V01321 -> population count by color/race
     #   - demografia_V01031:V01041 -> population count by age group
 
@@ -90,6 +91,20 @@ prepare_census_data <- function(year) {
       V0001
     )
 
+    dom <- censobr::read_tracts(year, dataset = "Domicilio")
+    dom <- dplyr::select(
+      dom,
+      code_tract,
+      domicilio01_V00005,
+      domicilio01_V00006
+    )
+
+    census_data <- dplyr::left_join(bas, dom, by = "code_tract")
+    census_data <- dplyr::mutate(
+      census_data,
+      moradores_dom_part = domicilio01_V00005 + domicilio01_V00006
+    )
+
     pess <- censobr::read_tracts(year, dataset = "Pessoas")
     pess <- dplyr::select(
       pess,
@@ -98,7 +113,7 @@ prepare_census_data <- function(year) {
       demografia_V01031:demografia_V01041
     )
 
-    census_data <- dplyr::left_join(bas, pess, by = "code_tract")
+    census_data <- dplyr::left_join(census_data, pess, by = "code_tract")
 
     census_data <- dplyr::select(
       census_data,
@@ -106,6 +121,7 @@ prepare_census_data <- function(year) {
       cod_muni = code_muni,
       cod_uf = code_state,
       moradores_total = V0001,
+      moradores_dom_part,
       cor_branca = raca_V01317,
       cor_preta = raca_V01318,
       cor_amarela = raca_V01319,
@@ -124,14 +140,6 @@ prepare_census_data <- function(year) {
       idade_70mais = demografia_V01041
     )
   }
-
-  # total population count will be derived from statistical grid data, not
-  # from census data. from the census data, we want the proportions of each
-  # group
-  #
-  # FIXME: there are tracts with 0 moradores_total and non negligibles
-  # age_total and race_total. investigate the difference between these
-  # variables again.
 
   cols <- names(census_data)
   age_cols <- cols[grepl("^idade_", cols)]
@@ -152,22 +160,84 @@ prepare_census_data <- function(year) {
 
   expr <- parse(text = paste(age_cols, collapse = "+"))
   census_data <- dplyr::mutate(census_data, age_total = eval(expr))
-  census_data <- dplyr::mutate(
-    census_data,
-    dplyr::across(
-      dplyr::starts_with("idade"),
-      list(prop = ~ . / age_total)
-    )
-  )
 
   expr <- parse(text = paste(race_cols, collapse = "+"))
   census_data <- dplyr::mutate(census_data, race_total = eval(expr))
+
+  if (year == 2022) {
+    # some tracts have discrepancies between moradores_total and
+    # race/age_total. in some cases, this is for, allegedly, privacy concerns.
+    # counts per group are never shown if they are lower than 3. so, when there
+    # is a difference between general and grouped totals lower than 3, and only
+    # one of the groups is zeroed, we assume the missing people come from these
+    # groups. we cannot "fix" tracts in which more than one group is zeroed,
+    # because we don't know how the distribution between the zeroed groups look
+    # like
+
+    census_data <- data.table::setDT(dplyr::collect(census_data))
+
+    {
+      census_data[, race_diff := moradores_total - race_total]
+      census_data[race_diff <= 2 & race_diff > 0]
+
+      n_zeroed_vars_expr <- paste(
+        glue::glue("({race_cols} == 0)"),
+        collapse = "+"
+      )
+      n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
+
+      census_data[, n_zeroed_race := eval(n_zeroed_vars_expr)]
+
+      for (col in race_cols) {
+        census_data[
+          race_diff <= 2 & race_diff > 0 & n_zeroed_race == 1 & get(col) == 0,
+          (col) := race_diff
+        ]
+      }
+    }
+
+    {
+      census_data[, age_diff := moradores_total - age_total]
+      census_data[age_diff <= 2 & age_diff > 0]
+
+      n_zeroed_vars_expr <- paste(
+        glue::glue("({age_cols} == 0)"),
+        collapse = "+"
+      )
+      n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
+
+      census_data[, n_zeroed_age := eval(n_zeroed_vars_expr)]
+
+      for (col in age_cols) {
+        census_data[
+          age_diff <= 2 & age_diff > 0 & n_zeroed_age == 1 & get(col) == 0,
+          (col) := age_diff
+        ]
+      }
+    }
+
+    # census_data[race_diff <= 2 & race_diff > 0 & n_zeroed_race == 1]
+    # census_data[age_diff <= 2 & age_diff > 0 & n_zeroed_age == 1]
+
+    expr <- parse(text = paste(age_cols, collapse = "+"))
+    census_data <- dplyr::mutate(census_data, age_total = eval(expr))
+
+    expr <- parse(text = paste(race_cols, collapse = "+"))
+    census_data <- dplyr::mutate(census_data, race_total = eval(expr))
+  }
+
+  # total population count will be derived from statistical grid data, not
+  # from census data. from the census data, we want the proportions of each
+  # group
+
   census_data <- dplyr::mutate(
     census_data,
-    dplyr::across(
-      dplyr::starts_with("cor"),
-      list(prop = ~ . / race_total)
-    )
+    dplyr::across(dplyr::starts_with("idade"), list(prop = ~ . / age_total))
+  )
+
+  census_data <- dplyr::mutate(
+    census_data,
+    dplyr::across(dplyr::starts_with("cor"), list(prop = ~ . / race_total))
   )
 
   census_data <- dplyr::select(
@@ -175,12 +245,17 @@ prepare_census_data <- function(year) {
     dplyr::starts_with("cod"),
     dplyr::matches("renda_total"), # só seleciona para o ano de 2010
     moradores_total,
+    moradores_via_dom,
+    tot_idade,
     age_total,
     race_total,
     dplyr::contains("prop")
   )
 
   census_data <- data.table::setDT(dplyr::collect(census_data))
+
+  census_data[is.na(moradores_via_dom), moradores_via_dom := 0]
+  census_data[is.na(tot_idade), tot_idade := 0]
 
   # we can remove tracts that don't have any population on them, because they
   # will not affect the aggregation processes from the census tracts to the
@@ -194,9 +269,9 @@ prepare_census_data <- function(year) {
   # moradores_total > 0 e age_total ou race_total == 0. por quê? isso não
   # acontece em 2010.
   #
-  # ainda, em 2022: (458772 registros)
-  # nrow(census_data[moradores_total == race_total])     - 303040 66%
-  # nrow(census_data[moradores_total == age_total])      - 414770 90%
+  # ainda, em 2022: (468099 registros)
+  # nrow(census_data[moradores_total == race_total])     - 303040 65%
+  # nrow(census_data[moradores_total == age_total])      - 414770 89%
   #
   # em 2010: (310120 registros)
   # nrow(census_data[moradores_total == race_total])     - 244056 79%
@@ -348,7 +423,7 @@ custom_difference <- function(x) {
 
   to_remove <- numeric()
 
-  for (i in 1:nrow(x)) {
+  for (i in seq_len(nrow(x))) {
     to_clip <- treated_x[i, ]
 
     mask <- treated_x[-c(i, to_remove), ]
