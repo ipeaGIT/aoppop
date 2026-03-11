@@ -1,7 +1,4 @@
-options(
-  TARGETS_SHOW_PROGRESS = TRUE,
-  TARGETS_N_CORES = 10
-)
+options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = 12)
 
 suppressPackageStartupMessages({
   library(targets)

@@ -151,7 +151,8 @@ prepare_census_data <- function(year) {
       c(
         moradores_total,
         dplyr::starts_with("idade"),
-        dplyr::starts_with("cor")
+        dplyr::starts_with("cor"),
+        dplyr::matches("moradores_dom_part"), # só seleciona para o ano de 2022
       ),
       ~ ifelse(is.na(.), 0, .)
     )
@@ -176,54 +177,17 @@ prepare_census_data <- function(year) {
 
     census_data <- data.table::setDT(dplyr::collect(census_data))
 
-    {
-      census_data[, race_diff := moradores_total - race_total]
-      census_data[race_diff <= 2 & race_diff > 0]
+    census_data <- fill_missing_counts(census_data, "age", age_cols)
+    census_data <- fill_missing_counts(census_data, "race", race_cols)
 
-      n_zeroed_vars_expr <- paste(
-        glue::glue("({race_cols} == 0)"),
-        collapse = "+"
-      )
-      n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
+    age_sum_expr <- parse(text = paste(age_cols, collapse = "+"))
+    census_data[, age_total := eval(age_sum_expr)]
 
-      census_data[, n_zeroed_race := eval(n_zeroed_vars_expr)]
+    race_sum_expr <- parse(text = paste(race_cols, collapse = "+"))
+    census_data[, race_total := eval(race_sum_expr)]
 
-      for (col in race_cols) {
-        census_data[
-          race_diff <= 2 & race_diff > 0 & n_zeroed_race == 1 & get(col) == 0,
-          (col) := race_diff
-        ]
-      }
-    }
-
-    {
-      census_data[, age_diff := moradores_total - age_total]
-      census_data[age_diff <= 2 & age_diff > 0]
-
-      n_zeroed_vars_expr <- paste(
-        glue::glue("({age_cols} == 0)"),
-        collapse = "+"
-      )
-      n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
-
-      census_data[, n_zeroed_age := eval(n_zeroed_vars_expr)]
-
-      for (col in age_cols) {
-        census_data[
-          age_diff <= 2 & age_diff > 0 & n_zeroed_age == 1 & get(col) == 0,
-          (col) := age_diff
-        ]
-      }
-    }
-
-    # census_data[race_diff <= 2 & race_diff > 0 & n_zeroed_race == 1]
-    # census_data[age_diff <= 2 & age_diff > 0 & n_zeroed_age == 1]
-
-    expr <- parse(text = paste(age_cols, collapse = "+"))
-    census_data <- dplyr::mutate(census_data, age_total = eval(expr))
-
-    expr <- parse(text = paste(race_cols, collapse = "+"))
-    census_data <- dplyr::mutate(census_data, race_total = eval(expr))
+    census_data <- remove_collective_hh_tracts(census_data, "age", age_cols)
+    census_data <- remove_collective_hh_tracts(census_data, "race", race_cols)
   }
 
   # total population count will be derived from statistical grid data, not
@@ -245,17 +209,12 @@ prepare_census_data <- function(year) {
     dplyr::starts_with("cod"),
     dplyr::matches("renda_total"), # só seleciona para o ano de 2010
     moradores_total,
-    moradores_via_dom,
-    tot_idade,
     age_total,
     race_total,
     dplyr::contains("prop")
   )
 
   census_data <- data.table::setDT(dplyr::collect(census_data))
-
-  census_data[is.na(moradores_via_dom), moradores_via_dom := 0]
-  census_data[is.na(tot_idade), tot_idade := 0]
 
   # we can remove tracts that don't have any population on them, because they
   # will not affect the aggregation processes from the census tracts to the
@@ -276,14 +235,89 @@ prepare_census_data <- function(year) {
   # em 2010: (310120 registros)
   # nrow(census_data[moradores_total == race_total])     - 244056 79%
   # nrow(census_data[moradores_total == age_total])      - 244432 79%
+  #
+  #
+  #
+  # depois de "preencher" contagens zeradas de grupos com a diferença <=2, por
+  # supostas questões de privacidade, ficamos assim em 2022:
+  #   (468099 registros)
+  # nrow(census_data[moradores_total == race_total])     - 329378 70%
+  # nrow(census_data[moradores_total == age_total])      - 430912 92%
+  #
+  # depois de remover setores sem residentes de domicílios particulares e com
+  # totais por grupo zerados:
+  #   (464434 registros)
+  # nrow(census_data[moradores_total == race_total])     - 329378 71%
+  # nrow(census_data[moradores_total == age_total])      - 430912 93%
 
   census_data[, c("moradores_total", "age_total", "race_total") := NULL]
 
   return(census_data[])
 }
 
-# census_tracts <- tar_read(pop_units_tracts)[[1]]
-# census_data <- tar_read(census_data)[[1]]
+# group <- "race"
+# cols <- race_cols
+fill_missing_counts <- function(census_data, group, cols) {
+  group_total <- ifelse(group == "race", "race_total", "age_total")
+
+  census_data[, group_diff := moradores_total - get(group_total)]
+
+  n_zeroed_vars_expr <- paste(
+    glue::glue("({cols} == 0)"),
+    collapse = "+"
+  )
+  n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
+
+  census_data[, n_zeroed := eval(n_zeroed_vars_expr)]
+
+  for (col in cols) {
+    census_data[
+      group_diff <= 2 & group_diff > 0 & n_zeroed == 1 & get(col) == 0,
+      (col) := group_diff
+    ]
+  }
+
+  census_data[, c("group_diff", "n_zeroed") := NULL]
+
+  return(census_data[])
+}
+
+# group <- "age"
+# cols <- age_cols
+remove_collective_hh_tracts <- function(census_data, group, cols) {
+  group_total <- ifelse(group == "race", "race_total", "age_total")
+
+  census_data[, group_diff := moradores_total - get(group_total)]
+
+  n_zeroed_vars_expr <- paste(
+    glue::glue("({cols} == 0)"),
+    collapse = "+"
+  )
+  n_zeroed_vars_expr <- parse(text = n_zeroed_vars_expr)
+
+  census_data[, n_zeroed := eval(n_zeroed_vars_expr)]
+
+  # we remove tracts that don't have any residents of private households and
+  # whose group total is also zero. however, we also impose the condition of
+  # the difference between the group total and the total population count being
+  # higher than twice the number of zeroed group classes. group counts are only
+  # shown if they are higher than 2, so if the difference is smaller than twice
+  # the number of zeroed classes, we cannot know if the group counts are
+  # actually zero or if they are masked for privacy concerns
+
+  census_data <- census_data[
+    !(group_diff > n_zeroed * 2 &
+      moradores_dom_part == 0 &
+      get(group_total) == 0)
+  ]
+
+  census_data[, c("group_diff", "n_zeroed") := NULL]
+
+  return(census_data[])
+}
+
+# census_tracts <- tar_read(pop_units_tracts, branches = 1)
+# census_data <- tar_read(census_data, branches = 1)
 merge_census_tracts_data <- function(census_tracts, census_data) {
   tracts_with_data <- dplyr::left_join(
     census_tracts,
@@ -316,7 +350,9 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
 
   # some tracts overlap, which create problems when later reaggregating census
   # data to hex grid (population count would be overcounted). we remove these
-  # overlapping bits with st_difference(). the problem is that this function may
+  # overlapping bits with st_difference().
+
+  #  the problem is that this function may
   # cause some very-hard-to-track topology errors, in the format
   # "TopologyException: side location conflict at x y".
   #
@@ -333,25 +369,26 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
   # st_collection_extract().
 
   individual_tracts <- sf::st_transform(individual_tracts, 5880)
+  individual_tracts <- sf::st_difference(individual_tracts)
 
-  individual_tracts_or_error <- tryCatch(
-    sf::st_difference(individual_tracts),
-    error = function(cnd) cnd
-  )
+  # individual_tracts_or_error <- tryCatch(
+  #   sf::st_difference(individual_tracts),
+  #   error = function(cnd) cnd
+  # )
 
-  if (inherits(individual_tracts_or_error, "error")) {
-    stop("chegou até aqui")
+  # if (inherits(individual_tracts_or_error, "error")) {
+  #   stop("chegou até aqui")
 
-    individual_tracts <- sf::st_buffer(individual_tracts, 0)
-    individual_tracts <- sf::st_difference(individual_tracts)
+  #   individual_tracts <- sf::st_buffer(individual_tracts, 0)
+  #   individual_tracts <- sf::st_difference(individual_tracts)
 
-    # individual_tracts_or_error <- tryCatch(
-    #   sf::st_difference(individual_tracts),
-    #   error = function(cnd) cnd
-    # )
-  } else {
-    individual_tracts <- individual_tracts_or_error
-  }
+  #   # individual_tracts_or_error <- tryCatch(
+  #   #   sf::st_difference(individual_tracts),
+  #   #   error = function(cnd) cnd
+  #   # )
+  # } else {
+  #   individual_tracts <- individual_tracts_or_error
+  # }
 
   individual_tracts <- sf::st_collection_extract(individual_tracts, "POLYGON")
   individual_tracts <- sf::st_make_valid(individual_tracts)

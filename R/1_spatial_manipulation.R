@@ -32,24 +32,45 @@ download_census_tracts <- function(year) {
 # year <- tar_read(years)[1]
 download_statistical_grid <- function(year) {
   if (year == 2010) {
-    statistical_grid <- NULL
-
-    while (is.null(statistical_grid)) {
-      statistical_grid <- geobr::read_statistical_grid(
-        "all",
-        year = year,
-        showProgress = getOption("TARGETS_SHOW_PROGRESS")
-      )
-    }
-
-    statistical_grid <- statistical_grid[,
-      c("ID_UNICO", "MASC", "FEM", "POP", "DOM_OCU", "geom")
-    ]
-
-    return(statistical_grid)
+    download_statistical_grid_2010()
   } else {
-    return(NULL)
+    download_statistical_grid_2022()
   }
+}
+
+download_statistical_grid_2010 <- function() {
+  statistical_grid <- NULL
+
+  while (is.null(statistical_grid)) {
+    statistical_grid <- geobr::read_statistical_grid(
+      "all",
+      year = 2010,
+      showProgress = getOption("TARGETS_SHOW_PROGRESS")
+    )
+  }
+
+  statistical_grid <- statistical_grid[,
+    c("ID_UNICO", "MASC", "FEM", "POP", "DOM_OCU", "geom")
+  ]
+
+  return(statistical_grid)
+}
+
+download_statistical_grid_2022 <- function() {
+  ftp_page_url <- "https://geoftp.ibge.gov.br/recortes_para_fins_estatisticos/grade_estatistica/censo_2022/grade_estatistica"
+
+  ftp_page_cont <- readLines(ftp_page_url, encoding = "latin1")
+
+  grid_urls <- stringr::str_extract(ftp_page_cont, "grade_id\\d{2}\\.zip")
+  grid_urls <- grid_urls[!is.na(grid_urls)]
+  grid_urls <- file.path(ftp_page_url, grid_urls)
+
+  dest_dir <- tempfile("statistical_grid")
+  file.create(dest_dir)
+
+  dests <- file.path(dest_dir, basename(grid_urls))
+
+  reqs <- lapply(grid_urls, httr2::request)
 }
 
 download_urban_concentrations <- function() {
