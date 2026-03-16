@@ -66,11 +66,44 @@ download_statistical_grid_2022 <- function() {
   grid_urls <- file.path(ftp_page_url, grid_urls)
 
   dest_dir <- tempfile("statistical_grid")
-  file.create(dest_dir)
+  dir.create(dest_dir)
 
   dests <- file.path(dest_dir, basename(grid_urls))
 
-  reqs <- lapply(grid_urls, httr2::request)
+  reqs <- lapply(grid_urls, function(u) {
+    httr2::req_throttle(httr2::request(u), capacity = 15, fill_time_s = 10)
+  })
+
+  res <- httr2::req_perform_parallel(
+    reqs,
+    paths = dests,
+    max_active = getOption("TARGETS_N_CORES")
+  )
+
+  invisible(lapply(dests, function(p) zip::unzip(p, exdir = dest_dir)))
+
+  shp_files <- list.files(dest_dir, pattern = "\\.shp$")
+  shp_files <- file.path(dest_dir, shp_files)
+
+  layer_names <- stringr::str_extract(basename(shp_files), ".*(?=.shp)")
+
+  geoms <- mapply(
+    file = shp_files,
+    layer = layer_names,
+    FUN = function(file, layer) {
+      sf::read_sf(
+        file,
+        query = glue::glue("SELECT ID_UNICO, TOTAL FROM {layer}")
+      )
+    },
+    SIMPLIFY = FALSE
+  )
+
+  statistical_grid <- data.table::rbindlist(geoms)
+  data.table::setnames(statistical_grid, old = "TOTAL", new = "POP")
+  statistical_grid <- sf::st_as_sf(statistical_grid)
+
+  return(statistical_grid)
 }
 
 download_urban_concentrations <- function() {

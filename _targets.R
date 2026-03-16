@@ -22,13 +22,14 @@ tar_option_set(
   ),
   storage = "worker",
   retrieval = "worker",
-  workspace_on_error = TRUE
+  workspace_on_error = TRUE,
+  iteration = "list"
 )
 
 tar_source()
 
 list(
-  tar_target(h3_res, 7:9),
+  tar_target(h3_res, 7:9, iteration = "vector"),
   tar_target(years, c(2010, 2022)),
 
   # spatial manipulation
@@ -37,15 +38,13 @@ list(
     census_tracts,
     download_census_tracts(years),
     pattern = map(years),
-    deployment = "main",
-    iteration = "list"
+    deployment = "main"
   ),
   tar_target(
     census_statistical_grid,
     download_statistical_grid(years),
     pattern = map(years),
-    deployment = "main",
-    iteration = "list"
+    deployment = "main"
   ),
   tar_target(urban_concentrations, download_urban_concentrations()),
   tar_target(pop_arrangements, download_pop_arrangements()),
@@ -59,77 +58,88 @@ list(
     hex_grids,
     create_hex_grid(h3_res, pop_units),
     pattern = cross(h3_res, pop_units),
-    format = "file",
-    iteration = "list"
+    format = "file"
   ),
   tar_target(
     pop_units_tracts,
     subset_pop_units_tracts(census_tracts, pop_units),
-    pattern = map(census_tracts),
-    iteration = "list"
+    pattern = map(census_tracts)
   ),
 
   # data processing
 
   tar_target(
-    name = census_data,
-    command = prepare_census_data(years),
-    pattern = map(years),
-    iteration = "list"
+    census_data,
+    prepare_census_data(years),
+    pattern = map(years)
   ),
   tar_target(
     tracts_with_data,
     merge_census_tracts_data(pop_units_tracts, census_data),
-    pattern = map(pop_units_tracts, census_data),
-    iteration = "list"
+    pattern = map(pop_units_tracts, census_data)
   ),
   tar_target(
     individual_tracts_with_data,
     filter_tracts_with_data(years, tracts_with_data, pop_units),
-    pattern = cross(map(years, tracts_with_data), pop_units),
-    iteration = "list"
-  )
-  #,
-  # tar_target(
-  #   statistical_grid_with_pop,
-  #   subset(census_statistical_grid, POP > 0)
-  # ),
-  # tar_target(
-  #   individual_stat_grids,
-  #   filter_individual_stat_grids(
-  #     statistical_grid_with_pop,
-  #     individual_tracts_with_data
-  #   ),
-  #   pattern = map(individual_tracts_with_data),
-  #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list"
-  # ),
+    pattern = cross(map(years, tracts_with_data), pop_units)
+  ),
+  tar_target(
+    statistical_grid_with_pop,
+    subset(census_statistical_grid, POP > 0),
+    pattern = map(census_statistical_grid)
+  ),
+  tar_target(
+    individual_stat_grids,
+    filter_individual_stat_grids(
+      years,
+      statistical_grid_with_pop,
+      pop_units,
+      individual_tracts_with_data
+    ),
+    pattern = map(
+      cross(map(years, statistical_grid_with_pop), pop_units),
+      individual_tracts_with_data
+    )
+  ),
 
-  # # data interpolation
+  # data interpolation
+
+  # eh pra 37 ficarem com NULL no final
+  tar_target(
+    small_stat_grids_with_data,
+    aggregate_data_to_small_stat_grid(
+      years,
+      pop_units,
+      individual_stat_grids,
+      individual_tracts_with_data
+    ),
+    pattern = map(
+      cross(years, pop_units),
+      individual_stat_grids,
+      individual_tracts_with_data
+    )
+  )
+
   # tar_target(
   #   large_stat_grids_indices,
-  #   which(vapply(individual_stat_grids, nrow, numeric(1)) > 10000)
+  #   which(purrr::map_int(individual_stat_grids, nrow) > 10000),
+  #   iteration = "vector"
   # ),
   # tar_target(
   #   small_stat_grids,
-  #   individual_stat_grids[-large_stat_grids_indices],
-  #   iteration = "list"
+  #   individual_stat_grids[-large_stat_grids_indices]
   # ),
   # tar_target(
   #   large_stat_grids,
-  #   individual_stat_grids[large_stat_grids_indices],
-  #   iteration = "list"
+  #   individual_stat_grids[large_stat_grids_indices]
   # ),
   # tar_target(
   #   small_tracts_with_data,
-  #   individual_tracts_with_data[-large_stat_grids_indices],
-  #   iteration = "list"
+  #   individual_tracts_with_data[-large_stat_grids_indices]
   # ),
   # tar_target(
   #   large_tracts_with_data,
-  #   individual_tracts_with_data[large_stat_grids_indices],
-  #   iteration = "list"
+  #   individual_tracts_with_data[large_stat_grids_indices]
   # ),
   # tar_target(
   #   small_stat_grids_with_data,
@@ -140,8 +150,7 @@ list(
   #   ),
   #   pattern = map(small_stat_grids, small_tracts_with_data),
   #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list"
+  #   storage = "worker"
   # ),
   # tar_target(
   #   large_stat_grids_with_data,
@@ -151,8 +160,7 @@ list(
   #     manual_parallelization = TRUE
   #   ),
   #   pattern = map(large_stat_grids, large_tracts_with_data),
-  #   garbage_collection = TRUE,
-  #   iteration = "list"
+  #   garbage_collection = TRUE
   # ),
   # tar_target(
   #   stat_grids_with_data,
@@ -160,8 +168,7 @@ list(
   #     large_stat_grids_with_data,
   #     small_stat_grids_with_data,
   #     large_stat_grids_indices
-  #   ),
-  #   iteration = "list"
+  #   )
   # ),
 
   # # statistical grid to hexagons res 7
