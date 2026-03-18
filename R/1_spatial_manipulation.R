@@ -191,6 +191,21 @@ merge_pop_units <- function(concs, arrangs) {
   return(pop_units)
 }
 
+# stat_grid <- tar_read(census_statistical_grid, branches = 1)[[1]]
+# tracts <- tar_read(pop_units_tracts, branches = 1)[[1]]
+prepare_stat_grids <- function(stat_grid, tracts) {
+  stat_grid <- subset(stat_grid, POP > 0)
+
+  unified_tracts <- parallel_union(tracts)
+
+  do_intersect_tracts <- parallel_intersects(stat_grid, unified_tracts)
+  do_intersect_tracts <- lengths(do_intersect_tracts) > 0
+
+  stat_grid <- stat_grid[do_intersect_tracts, ]
+
+  return(stat_grid)
+}
+
 remove_small_crumbs <- function(geom) {
   exploded_geom <- sf::st_cast(geom, "POLYGON")
   areas <- as.numeric(sf::st_area(exploded_geom))

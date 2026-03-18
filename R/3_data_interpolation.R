@@ -26,38 +26,85 @@ aggregate_data_to_small_stat_grid <- function(
     setdiff(names(tracts_with_data), cols_to_drop)
   ]
 
+  # signaling which tracts are empty (i.e. no population), which will be
+  # important when calculation the group population in each intersection
+  # "slice"
+
+  tracts_with_data <- dplyr::mutate(
+    tracts_with_data,
+    is_empty = (cor_branca_prop == 0 &
+      cor_parda_prop == 0 &
+      cor_preta_prop == 0 &
+      cor_indigena_prop == 0 &
+      cor_amarela_prop == 0 &
+      cor_nao_ident_prop == 0)
+  )
+
   # suppressed warning:
   #   - attribute variables are assumed to be spatially constant throughout all geometries
+
+  # TODO: SE DER CERTO, TIRAR ISSO DAQUI E BOTAR NA QUE FAZ OS INDIVIDUAL_TRACTS
+  tracts_with_data <- sf::st_make_valid(tracts_with_data)
 
   grid_tracts_intersection <- suppressWarnings(
     sf::st_intersection(stat_grid, tracts_with_data)
   )
-
-  # st make valid changes geometry so we have to calculate grid cell and census
-  # tracts areas after making the geometries valid. if we don't, our final
-  # population (calculated from the group proportions and by the intersect
-  # areas) will be different to the sum of the population in the grid cells
-
   grid_tracts_intersection <- sf::st_make_valid(grid_tracts_intersection)
+
+  # previously used st_make_valid() changes geometries, so we have to calculate
+  # grid cell and census tracts areas after making the geometries valid. if we
+  # don't, our final population (calculated from the group proportions and by
+  # the intersect areas) and the sum of the population in the grid cells will
+  # be different
+
   grid_tracts_intersection$intersect_area <- as.numeric(
     sf::st_area(grid_tracts_intersection)
   )
 
+  # to calculate the population count by race and age group in each
+  # intersection, we just need to multiply the population in each intersection
+  # by the proportions of each group, previously calculated. we have a few cases
+  # we have to pay attention, though.
+
+  # - first: if a grid cell only intercepts with one tract and this tract
+  # doesn't contain any population, we cannot "throw away" the cell population.
+  # instead, we assume the population is non identified in terms of group
+  # classification, and set cor/idade_nao_ident_prop to 1, while also setting
+  # the intersection to not empty
+
   data.table::setDT(grid_tracts_intersection)
 
-  grid_tracts_intersection[,
-    tract_total_area := sum(intersect_area),
-    by = code_tract
+  grid_tracts_intersection[
+    grid_tracts_intersection[, .I[all(is_empty)], by = ID_UNICO]$V1,
+    `:=`(
+      cor_nao_ident_prop = 1,
+      idade_nao_ident_prop = 1,
+      is_empty = FALSE
+    )
   ]
+
+  # - second: if, on the other hand, a cell intercepts with several tracts,
+  # and at least one of them contain any population, we remove the empty
+  # interceptions and use only the non empty to calculate the group sizes. since
+  # we have set the previous cases to not empty, we can simply remove the empty
+  # slices now, as they are guaranteed not to be the only intersection with the
+  # grid cells
+
+  grid_tracts_intersection <- grid_tracts_intersection[is_empty == FALSE]
+
+  # grid_tracts_intersection[,
+  #   tract_total_area := sum(intersect_area),
+  #   by = code_tract
+  # ]
   grid_tracts_intersection[,
     grid_total_area := sum(intersect_area),
     by = ID_UNICO
   ]
 
   grid_tracts_intersection[, prop_grid_area := intersect_area / grid_total_area]
-  grid_tracts_intersection[,
-    prop_tract_area := intersect_area / tract_total_area
-  ]
+  # grid_tracts_intersection[,
+  #   prop_tract_area := intersect_area / tract_total_area
+  # ]
 
   # to calculate the total income in each intersection, we have to calculate the
   # population in each intersection (from the statistical grid population
@@ -66,9 +113,7 @@ aggregate_data_to_small_stat_grid <- function(
   # intersection. income is distributed according to this share - i.e. we assume
   # that income is evenly distributed among individuals living in the same tract
 
-  grid_tracts_intersection[,
-    intersect_population := prop_grid_area * pop_count
-  ]
+  grid_tracts_intersection[, intersect_population := prop_grid_area * pop_count]
 
   if (year == 2010) {
     grid_tracts_intersection[,
@@ -81,10 +126,6 @@ aggregate_data_to_small_stat_grid <- function(
         tract_population
     ]
   }
-
-  # to calculate the population count by race and age group in each
-  # intersection, we just need to multiply the population in each intersection
-  # by the proportions of each group, previously calculated
 
   group_prop_cols <- setdiff(
     names(tracts_with_data),
@@ -123,6 +164,11 @@ aggregate_data_to_small_stat_grid <- function(
   # would not be valid. related to
   # https://github.com/Rdatatable/data.table/issues/4217
 
+  # TODO: MOVE THIS TO INDIVIDUAL GRID FUNC
+  if (year == 2022) {
+    stat_grid <- dplyr::rename(stat_grid, geom = geometry)
+  }
+
   grid_with_data <- dplyr::left_join(
     grid_with_data,
     stat_grid[, c("ID_UNICO", "geom")],
@@ -137,18 +183,19 @@ aggregate_data_to_small_stat_grid <- function(
   }
 
   total_pop <- sum(grid_with_data$pop_total)
-  total_pop_age <- sum(grid_with_data$idade_0a5) +
-    sum(grid_with_data$idade_6a14) +
-    sum(grid_with_data$idade_15a18) +
-    sum(grid_with_data$idade_19a24) +
-    sum(grid_with_data$idade_25a39) +
-    sum(grid_with_data$idade_40a69) +
-    sum(grid_with_data$idade_70mais)
+
+  total_pop_age <- 0
+  age_cols <- names(grid_with_data)[grepl("idade_", names(grid_with_data))]
+  for (col in age_cols) {
+    total_pop_age <- total_pop_age + sum(grid_with_data[[col]])
+  }
+
   total_pop_color <- sum(grid_with_data$cor_branca) +
     sum(grid_with_data$cor_preta) +
     sum(grid_with_data$cor_amarela) +
     sum(grid_with_data$cor_parda) +
-    sum(grid_with_data$cor_indigena)
+    sum(grid_with_data$cor_indigena) +
+    sum(grid_with_data$cor_nao_ident)
 
   if (!dplyr::near(total_pop, total_pop_age)) {
     format(total_pop_age, nsmall = 10)
@@ -578,108 +625,4 @@ aggregate_data_to_hexagons <- function(
   saveRDS(full_hexs_with_data, filepath)
 
   return(filepath)
-}
-
-parallel_intersection <- function(x, y, n_cores) {
-  if (n_cores == 1) {
-    batch_indices = list(1:nrow(x))
-  } else {
-    indices_cuts <- cut(1:nrow(x), breaks = n_cores)
-    batch_indices <- split(1:nrow(x), indices_cuts)
-  }
-
-  future::plan(future.callr::callr, workers = n_cores)
-
-  intersections_list <- furrr::future_map(
-    batch_indices,
-    function(is) {
-      unified_x <- sf::st_union(x[is, ])
-
-      intersecting_y <- sf::st_intersects(y, unified_x)
-      filtered_y <- y[lengths(intersecting_y) > 0, ]
-
-      sf::st_intersection(x[is, ], filtered_y)
-    },
-    .options = furrr::furrr_options(seed = TRUE, globals = c("x", "y")),
-    .progress = getOption("TARGETS_SHOW_PROGRESS")
-  )
-
-  future::plan(future::sequential)
-
-  # the class of the geom column of each list element may be different,
-  # depending whether the intersection result in polygon or multipolygon
-  # objects. so we check if they are different, and, if so, we cast it to the
-  # same class
-
-  intersected_obj <- do.call(rbind, intersections_list)
-
-  return(intersected_obj)
-}
-
-parallel_union <- function(object, n_cores) {
-  if (n_cores == 1) {
-    batch_indices = list(1:nrow(object))
-  } else {
-    indices_cuts <- cut(1:nrow(object), breaks = n_cores)
-    batch_indices <- split(1:nrow(object), indices_cuts)
-  }
-
-  future::plan(future.callr::callr, workers = n_cores)
-
-  unified_object_list <- furrr::future_map(
-    batch_indices,
-    function(is) {
-      x <- sf::st_union(object[is, ])
-      x <- sf::st_make_valid(x)
-      x
-    },
-    .options = furrr::furrr_options(seed = TRUE, globals = "object"),
-    .progress = getOption("TARGETS_SHOW_PROGRESS")
-  )
-
-  future::plan(future::sequential)
-
-  unified_object <- Reduce(
-    function(obj1, obj2) {
-      x <- sf::st_union(obj1, obj2)
-      x <- sf::st_make_valid(x)
-    },
-    unified_object_list
-  )
-
-  return(unified_object)
-}
-
-parallel_intersection_in_batches <- function(
-  x,
-  y,
-  n_batches,
-  n_cores_union,
-  n_cores_inter
-) {
-  if (n_batches == 1) {
-    batch_indices = list(1:nrow(x))
-  } else {
-    indices_cuts <- cut(1:nrow(x), breaks = n_batches)
-    batch_indices <- split(1:nrow(x), indices_cuts)
-  }
-
-  intersections_list <- lapply(
-    batch_indices,
-    function(is) {
-      if (n_batches > 1) {
-        unified_x <- parallel_union(x[is, ], n_cores_union)
-
-        intersecting_y <- sf::st_intersects(y, unified_x)
-        y <- y[lengths(intersecting_y) > 0, ]
-      }
-
-      parallel_intersection(x[is, ], y, n_cores_inter)
-    }
-  )
-
-  intersected_obj <- do.call(rbind, intersections_list)
-  intersected_obj <- sf::st_make_valid(intersected_obj)
-
-  return(intersected_obj)
 }

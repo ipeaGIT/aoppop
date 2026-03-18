@@ -411,11 +411,13 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
 
   individual_tracts <- sf::st_transform(individual_tracts, 5880)
   individual_tracts <- sf::st_difference(individual_tracts)
-
   individual_tracts <- sf::st_collection_extract(individual_tracts, "POLYGON")
   individual_tracts <- sf::st_make_valid(individual_tracts)
 
   individual_tracts <- sf::st_transform(individual_tracts, 4674)
+
+  # TODO: ACHO QUE VAI TER QUE BOTAR ISSO AQUI
+  # individual_tracts <- sf::st_make_valid(individual_tracts)
 
   return(individual_tracts)
 }
@@ -497,9 +499,9 @@ custom_difference <- function(x) {
   return(treated_x)
 }
 
-# n_pop_unit <- 240
+# n_pop_unit <- 170
 # year <- 2022
-# stat_grid <- tar_read(statistical_grid_with_pop, branches = ifelse(year == 2010, 1, 2))[[1]]
+# stat_grid <- tar_read(pop_units_stat_grids, branches = ifelse(year == 2010, 1, 2))[[1]]
 # pop_unit <- tar_read(pop_units)[n_pop_unit, ]
 # tracts_with_data <- tar_read(individual_tracts_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
 filter_individual_stat_grids <- function(
@@ -545,25 +547,25 @@ filter_individual_stat_grids <- function(
   filtered_grid <- stat_grid[do_intersect, ]
 
   # finally, we have to intersect the statistical grid with the census tracts
-  # that cover the urban concentrations. that's because we want to consider only
-  # the population in the portions of the grid cell that in fact intersect with
-  # the tracts. we use the 'tracts_with_data' object to make sure that we're not
-  # considering tracts that don't have any population
+  # that cover the urban concentrations. that's because we consider that the
+  # population is distributed only in the areas covered by the tracts (i.e. it's
+  # not distributed on top of a body of water or a forest, for example).
+  #
   # suppressed warning:
   #  - attribute variables are assumed to be spatially constant throughout all
   #    geometries
 
-  filtered_grid$area_before <- as.numeric(sf::st_area(filtered_grid))
+  # filtered_grid$area_before <- as.numeric(sf::st_area(filtered_grid))
 
   suppressWarnings(
     filtered_grid <- sf::st_intersection(filtered_grid, unified_tracts)
   )
 
-  filtered_grid$area_after <- as.numeric(sf::st_area(filtered_grid))
-  filtered_grid <- dplyr::mutate(
-    filtered_grid,
-    share_of_orig_area = area_after / area_before
-  )
+  # filtered_grid$area_after <- as.numeric(sf::st_area(filtered_grid))
+  # filtered_grid <- dplyr::mutate(
+  #   filtered_grid,
+  #   share_of_orig_area = area_after / area_before
+  # )
 
   # the intersection operation may result in polygons so small that they become
   # empty geometrycollections after st_make_valid(). we remove them, otherwise
@@ -572,24 +574,7 @@ filter_individual_stat_grids <- function(
   filtered_grid <- sf::st_make_valid(filtered_grid)
   filtered_grid <- filtered_grid[!sf::st_is_empty(filtered_grid), ]
 
-  filtered_grid <- dplyr::mutate(
-    filtered_grid,
-    pop_count = POP * share_of_orig_area
-    # ,
-    # men = MASC * share_of_orig_area,
-    # women = FEM * share_of_orig_area,
-    # occup_hholds = DOM_OCU * share_of_orig_area
-  )
-
-  filtered_grid <- dplyr::select(
-    filtered_grid,
-    ID_UNICO,
-    pop_count
-    # ,
-    # men,
-    # women,
-    # occup_hholds
-  )
+  filtered_grid <- dplyr::select(filtered_grid, c(ID_UNICO, pop_count = POP))
 
   return(filtered_grid)
 }

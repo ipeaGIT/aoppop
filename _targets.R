@@ -65,6 +65,12 @@ list(
     subset_pop_units_tracts(census_tracts, pop_units),
     pattern = map(census_tracts)
   ),
+  tar_target(
+    populated_stat_grids,
+    prepare_stat_grids(census_statistical_grid, pop_units_tracts),
+    pattern = map(census_statistical_grid, pop_units_tracts),
+    deployment = "main"
+  ),
 
   # data processing
 
@@ -84,20 +90,15 @@ list(
     pattern = cross(map(years, tracts_with_data), pop_units)
   ),
   tar_target(
-    statistical_grid_with_pop,
-    subset(census_statistical_grid, POP > 0),
-    pattern = map(census_statistical_grid)
-  ),
-  tar_target(
     individual_stat_grids,
     filter_individual_stat_grids(
       years,
-      statistical_grid_with_pop,
+      populated_stat_grids,
       pop_units,
       individual_tracts_with_data
     ),
     pattern = map(
-      cross(map(years, statistical_grid_with_pop), pop_units),
+      cross(map(years, populated_stat_grids), pop_units),
       individual_tracts_with_data
     )
   ),
