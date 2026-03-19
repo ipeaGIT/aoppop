@@ -10,10 +10,10 @@ parallel_intersection <- function(
     batch_indices <- split(seq_len(nrow(x)), indices_cuts)
   }
 
-  mirai::daemons(n_cores)
+  mirai::daemons(n_cores, idletime = 10000)
 
   intersections_list <- purrr::pmap(
-    list(x, y, batch_indices),
+    list(list(x), list(y), batch_indices),
     purrr::in_parallel(function(x, y, is) {
       unified_x <- sf::st_union(x[is, ])
 

@@ -1,5 +1,5 @@
 # n_pop_unit <- 1 # 240
-# year <- 2010
+# year <- 2022
 # pop_unit <- tar_read(pop_units)[n_pop_unit, ]
 # stat_grid <- tar_read(individual_stat_grids, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
 # tracts_with_data <- tar_read(individual_tracts_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
@@ -20,6 +20,83 @@ aggregate_data_to_small_stat_grid <- function(
     return(NULL)
   }
 
+  tracts_with_data <- prepare_tracts_for_intersection(tracts_with_data)
+
+  # suppressed warning:
+  #   - attribute variables are assumed to be spatially constant throughout all geometries
+  #
+  # ps: again we may have problems with some tracts, which raise errors of type
+  #  "Loop x edge y has duplicate near loop z edge w", even with the
+  #  st_make_valid() call at the end of the individual_tracts target. another
+  #  st_make_valid() solves this issue. example: n_pop_unit=223 year=2010
+  #  (piracicaba)
+
+  grid_tracts_intersection_or_error <- tryCatch(
+    suppressWarnings(sf::st_intersection(stat_grid, tracts_with_data)),
+    error = function(cnd) cnd
+  )
+
+  if (inherits(grid_tracts_intersection_or_error, "error")) {
+    tracts_with_data <- sf::st_make_valid(tracts_with_data)
+    grid_tracts_intersection <- suppressWarnings(
+      sf::st_intersection(stat_grid, tracts_with_data)
+    )
+  } else {
+    grid_tracts_intersection <- grid_tracts_intersection_or_error
+  }
+
+  grid_with_data <- interpolate_tracts_to_grid(
+    grid_tracts_intersection,
+    tracts_with_data,
+    stat_grid,
+    year
+  )
+
+  return(grid_with_data)
+}
+
+# n_possiveis <- c(51L, 78L, 98L, 108L, 170L, 192L, 212L, 239L, 240L, 256L, 276L,
+#               283L, 323L, 370L, 376L, 379L, 383L, 427L, 454L, 474L, 484L, 532L,
+#               546L, 568L, 588L, 615L, 616L, 620L, 632L, 652L, 657L, 659L, 683L,
+#               699L, 734L, 746L, 752L)
+# n <- 746 # 10092 celulas
+# n_pop_unit <- ifelse(n <= 376, n, n - 376)
+# year <- ifelse(n <= 376, 2010, 2022)
+# pop_unit <- tar_read(pop_units)[n_pop_unit, ]
+# stat_grid <- tar_read(individual_stat_grids, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
+# tracts_with_data <- tar_read(individual_tracts_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
+aggregate_data_to_large_stat_grid <- function(
+  year,
+  pop_unit,
+  stat_grid,
+  tracts_with_data
+) {
+  if (nrow(stat_grid) <= 10000) {
+    return(NULL)
+  }
+
+  cli::cli_inform(
+    paste(
+      "Bringing data to statistical grid for",
+      "unit {.val {pop_unit$treated_name}} and year {.val {year}}"
+    )
+  )
+
+  tracts_with_data <- prepare_tracts_for_intersection(tracts_with_data)
+
+  grid_tracts_intersection <- parallel_intersection(stat_grid, tracts_with_data)
+
+  grid_with_data <- interpolate_tracts_to_grid(
+    grid_tracts_intersection,
+    tracts_with_data,
+    stat_grid,
+    year
+  )
+
+  return(grid_with_data)
+}
+
+prepare_tracts_for_intersection <- function(tracts_with_data) {
   cols_to_drop <- c("cod_uf", "cod_muni")
 
   tracts_with_data <- tracts_with_data[,
@@ -40,15 +117,15 @@ aggregate_data_to_small_stat_grid <- function(
       cor_nao_ident_prop == 0)
   )
 
-  # suppressed warning:
-  #   - attribute variables are assumed to be spatially constant throughout all geometries
+  return(tracts_with_data)
+}
 
-  # TODO: SE DER CERTO, TIRAR ISSO DAQUI E BOTAR NA QUE FAZ OS INDIVIDUAL_TRACTS
-  tracts_with_data <- sf::st_make_valid(tracts_with_data)
-
-  grid_tracts_intersection <- suppressWarnings(
-    sf::st_intersection(stat_grid, tracts_with_data)
-  )
+interpolate_tracts_to_grid <- function(
+  grid_tracts_intersection,
+  tracts_with_data,
+  stat_grid,
+  year
+) {
   grid_tracts_intersection <- sf::st_make_valid(grid_tracts_intersection)
 
   # previously used st_make_valid() changes geometries, so we have to calculate
@@ -164,215 +241,210 @@ aggregate_data_to_small_stat_grid <- function(
   # would not be valid. related to
   # https://github.com/Rdatatable/data.table/issues/4217
 
-  # TODO: MOVE THIS TO INDIVIDUAL GRID FUNC
-  if (year == 2022) {
-    stat_grid <- dplyr::rename(stat_grid, geom = geometry)
-  }
-
   grid_with_data <- dplyr::left_join(
     grid_with_data,
-    stat_grid[, c("ID_UNICO", "geom")],
+    stat_grid[, c("ID_UNICO", "geometry")],
     by = "ID_UNICO"
   )
   grid_with_data <- sf::st_sf(grid_with_data)
 
-  # some sanity checks
+  # # some sanity checks
 
-  if (nrow(grid_with_data) < nrow(stat_grid)) {
-    stop("aggregated grid has less cells than raw grid")
-  }
+  # if (nrow(grid_with_data) < nrow(stat_grid)) {
+  #   stop("aggregated grid has less cells than raw grid")
+  # }
 
-  total_pop <- sum(grid_with_data$pop_total)
+  # total_pop <- sum(grid_with_data$pop_total)
 
-  total_pop_age <- 0
-  age_cols <- names(grid_with_data)[grepl("idade_", names(grid_with_data))]
-  for (col in age_cols) {
-    total_pop_age <- total_pop_age + sum(grid_with_data[[col]])
-  }
+  # total_pop_age <- 0
+  # age_cols <- names(grid_with_data)[grepl("idade_", names(grid_with_data))]
+  # for (col in age_cols) {
+  #   total_pop_age <- total_pop_age + sum(grid_with_data[[col]])
+  # }
 
-  total_pop_color <- sum(grid_with_data$cor_branca) +
-    sum(grid_with_data$cor_preta) +
-    sum(grid_with_data$cor_amarela) +
-    sum(grid_with_data$cor_parda) +
-    sum(grid_with_data$cor_indigena) +
-    sum(grid_with_data$cor_nao_ident)
+  # total_pop_color <- sum(grid_with_data$cor_branca) +
+  #   sum(grid_with_data$cor_preta) +
+  #   sum(grid_with_data$cor_amarela) +
+  #   sum(grid_with_data$cor_parda) +
+  #   sum(grid_with_data$cor_indigena) +
+  #   sum(grid_with_data$cor_nao_ident)
 
-  if (!dplyr::near(total_pop, total_pop_age)) {
-    format(total_pop_age, nsmall = 10)
-    format(total_pop, nsmall = 10)
-    stop("total pop by age is different than total pop")
-  }
+  # if (!dplyr::near(total_pop, total_pop_age)) {
+  #   format(total_pop_age, nsmall = 10)
+  #   format(total_pop, nsmall = 10)
+  #   stop("total pop by age is different than total pop")
+  # }
 
-  if (!dplyr::near(total_pop, total_pop_color)) {
-    format(total_pop_color, nsmall = 10)
-    format(total_pop, nsmall = 10)
-    stop("total pop by age is different than total pop")
-  }
-
-  return(grid_with_data)
-}
-
-# stat_grid <- tar_read(individual_stat_grids, 1)[[1]]
-# tracts_with_data <- tar_read(individual_tracts_with_data, 1)[[1]]
-# manual_parallelization <- TRUE
-aggregate_data_to_stat_grid <- function(
-  year,
-  stat_grid,
-  pop_unit,
-  tracts_with_data,
-  manual_parallelization
-) {
-  cols_to_drop <- c(
-    "zone",
-    "code_muni",
-    "name_muni",
-    "name_neighborhood",
-    "code_neighborhood",
-    "code_subdistrict",
-    "name_subdistrict",
-    "code_district",
-    "name_district",
-    "code_state",
-    "cod_uf",
-    "cod_muni"
-  )
-  tracts_with_data <- tracts_with_data[,
-    setdiff(names(tracts_with_data), cols_to_drop)
-  ]
-
-  tictoc::tic()
-  grid_tracts_intersection <- if (manual_parallelization) {
-    parallel_intersection(
-      stat_grid,
-      tracts_with_data,
-      n_cores = getOption("TARGETS_N_CORES")
-    )
-  } else {
-    sf::st_intersection(stat_grid, tracts_with_data)
-  }
-  tictoc::toc()
-
-  # st make valid changes geometry so we have to calculate grid cell and census
-  # tracts areas after making the geometries valid. if we don't, our final
-  # population (calculated from the group proportions and by the intersect
-  # areas) will be different to the sum of the population in the grid cells
-
-  grid_tracts_intersection <- sf::st_make_valid(grid_tracts_intersection)
-  grid_tracts_intersection$intersect_area <- as.numeric(
-    sf::st_area(grid_tracts_intersection)
-  )
-
-  data.table::setDT(grid_tracts_intersection)
-
-  grid_tracts_intersection[,
-    tract_total_area := sum(intersect_area),
-    by = code_tract
-  ]
-  grid_tracts_intersection[,
-    grid_total_area := sum(intersect_area),
-    by = ID_UNICO
-  ]
-
-  grid_tracts_intersection[, prop_grid_area := intersect_area / grid_total_area]
-  grid_tracts_intersection[,
-    prop_tract_area := intersect_area / tract_total_area
-  ]
-
-  # to calculate the total income in each intersection, we have to calculate the
-  # population in each intersection (from the statistical grid population
-  # count), calculate the total population count in each tract and then
-  # calculate the share of the total tract population count in each
-  # intersection. income is distributed according to this share - i.e. we assume
-  # that income is evenly distributed among individuals living in the same tract
-
-  grid_tracts_intersection[, intersect_population := prop_grid_area * pop_count]
-  grid_tracts_intersection[,
-    tract_population := sum(intersect_population),
-    by = code_tract
-  ]
-  grid_tracts_intersection[,
-    intersect_income := renda_total * intersect_population / tract_population
-  ]
-
-  # to calculate the population count by race and age group in each
-  # intersection, we just need to multiply the population in each intersection
-  # by the proportions of each group, previously calculated
-
-  group_prop_cols <- setdiff(
-    names(tracts_with_data),
-    c("code_tract", "renda_total", "geom", "tract_total_area")
-  )
-  new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
-
-  grid_tracts_intersection[,
-    (new_colnames) := lapply(.SD, function(x) x * intersect_population),
-    .SDcols = group_prop_cols
-  ]
-
-  # the total population count per group and total income in each grid cell is
-  # the sum of each of the variables calculated above by grid cell
-
-  cols_to_sum <- c("intersect_income", new_colnames)
-  final_colnames <- c("renda", sub("intersect_", "", cols_to_sum[-1]))
-
-  grid_with_data <- grid_tracts_intersection[,
-    append(
-      list(pop_total = pop_count[1], homens = men[1], mulheres = women[1]),
-      lapply(.SD, sum)
-    ),
-    by = ID_UNICO,
-    .SDcols = cols_to_sum
-  ]
-
-  data.table::setnames(grid_with_data, old = cols_to_sum, new = final_colnames)
-
-  # using data.table native left join would later result in an issue with some
-  # of the stat_grids (particularly São Roque's) in which the spatial objects
-  # would not be valid. related to
-  # https://github.com/Rdatatable/data.table/issues/4217
-
-  grid_with_data <- dplyr::left_join(
-    grid_with_data,
-    stat_grid[, c("ID_UNICO", "geom")],
-    by = "ID_UNICO"
-  )
-
-  grid_with_data <- sf::st_sf(grid_with_data)
-
-  # some sanity checks
-
-  if (nrow(grid_with_data) < nrow(stat_grid)) {
-    stop("aggregated grid has less cells than raw grid")
-  }
-
-  total_pop <- sum(grid_with_data$pop_total)
-  total_pop_age <- sum(grid_with_data$idade_0a5) +
-    sum(grid_with_data$idade_6a14) +
-    sum(grid_with_data$idade_15a18) +
-    sum(grid_with_data$idade_19a24) +
-    sum(grid_with_data$idade_25a39) +
-    sum(grid_with_data$idade_40a69) +
-    sum(grid_with_data$idade_70mais)
-  total_pop_color <- sum(grid_with_data$cor_branca) +
-    sum(grid_with_data$cor_preta) +
-    sum(grid_with_data$cor_amarela) +
-    sum(grid_with_data$cor_parda) +
-    sum(grid_with_data$cor_indigena)
-
-  if (!dplyr::near(total_pop, total_pop_age)) {
-    stop("total pop by age is different than total pop")
-    format(total_pop_age, nsmall = 10)
-    format(total_pop, nsmall = 10)
-  }
-
-  if (!dplyr::near(total_pop, total_pop_color)) {
-    stop("total pop by age is different than total pop")
-    format(total_pop_color, nsmall = 10)
-    format(total_pop, nsmall = 10)
-  }
+  # if (!dplyr::near(total_pop, total_pop_color)) {
+  #   format(total_pop_color, nsmall = 10)
+  #   format(total_pop, nsmall = 10)
+  #   stop("total pop by age is different than total pop")
+  # }
 
   return(grid_with_data)
 }
+
+# # stat_grid <- tar_read(individual_stat_grids, 1)[[1]]
+# # tracts_with_data <- tar_read(individual_tracts_with_data, 1)[[1]]
+# # manual_parallelization <- TRUE
+# aggregate_data_to_stat_grid <- function(
+#   year,
+#   stat_grid,
+#   pop_unit,
+#   tracts_with_data,
+#   manual_parallelization
+# ) {
+#   cols_to_drop <- c(
+#     "zone",
+#     "code_muni",
+#     "name_muni",
+#     "name_neighborhood",
+#     "code_neighborhood",
+#     "code_subdistrict",
+#     "name_subdistrict",
+#     "code_district",
+#     "name_district",
+#     "code_state",
+#     "cod_uf",
+#     "cod_muni"
+#   )
+#   tracts_with_data <- tracts_with_data[,
+#     setdiff(names(tracts_with_data), cols_to_drop)
+#   ]
+
+#   tictoc::tic()
+#   grid_tracts_intersection <- if (manual_parallelization) {
+#     parallel_intersection(
+#       stat_grid,
+#       tracts_with_data,
+#       n_cores = getOption("TARGETS_N_CORES")
+#     )
+#   } else {
+#     sf::st_intersection(stat_grid, tracts_with_data)
+#   }
+#   tictoc::toc()
+
+#   # st make valid changes geometry so we have to calculate grid cell and census
+#   # tracts areas after making the geometries valid. if we don't, our final
+#   # population (calculated from the group proportions and by the intersect
+#   # areas) will be different to the sum of the population in the grid cells
+
+#   grid_tracts_intersection <- sf::st_make_valid(grid_tracts_intersection)
+#   grid_tracts_intersection$intersect_area <- as.numeric(
+#     sf::st_area(grid_tracts_intersection)
+#   )
+
+#   data.table::setDT(grid_tracts_intersection)
+
+#   grid_tracts_intersection[,
+#     tract_total_area := sum(intersect_area),
+#     by = code_tract
+#   ]
+#   grid_tracts_intersection[,
+#     grid_total_area := sum(intersect_area),
+#     by = ID_UNICO
+#   ]
+
+#   grid_tracts_intersection[, prop_grid_area := intersect_area / grid_total_area]
+#   grid_tracts_intersection[,
+#     prop_tract_area := intersect_area / tract_total_area
+#   ]
+
+#   # to calculate the total income in each intersection, we have to calculate the
+#   # population in each intersection (from the statistical grid population
+#   # count), calculate the total population count in each tract and then
+#   # calculate the share of the total tract population count in each
+#   # intersection. income is distributed according to this share - i.e. we assume
+#   # that income is evenly distributed among individuals living in the same tract
+
+#   grid_tracts_intersection[, intersect_population := prop_grid_area * pop_count]
+#   grid_tracts_intersection[,
+#     tract_population := sum(intersect_population),
+#     by = code_tract
+#   ]
+#   grid_tracts_intersection[,
+#     intersect_income := renda_total * intersect_population / tract_population
+#   ]
+
+#   # to calculate the population count by race and age group in each
+#   # intersection, we just need to multiply the population in each intersection
+#   # by the proportions of each group, previously calculated
+
+#   group_prop_cols <- setdiff(
+#     names(tracts_with_data),
+#     c("code_tract", "renda_total", "geom", "tract_total_area")
+#   )
+#   new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
+
+#   grid_tracts_intersection[,
+#     (new_colnames) := lapply(.SD, function(x) x * intersect_population),
+#     .SDcols = group_prop_cols
+#   ]
+
+#   # the total population count per group and total income in each grid cell is
+#   # the sum of each of the variables calculated above by grid cell
+
+#   cols_to_sum <- c("intersect_income", new_colnames)
+#   final_colnames <- c("renda", sub("intersect_", "", cols_to_sum[-1]))
+
+#   grid_with_data <- grid_tracts_intersection[,
+#     append(
+#       list(pop_total = pop_count[1], homens = men[1], mulheres = women[1]),
+#       lapply(.SD, sum)
+#     ),
+#     by = ID_UNICO,
+#     .SDcols = cols_to_sum
+#   ]
+
+#   data.table::setnames(grid_with_data, old = cols_to_sum, new = final_colnames)
+
+#   # using data.table native left join would later result in an issue with some
+#   # of the stat_grids (particularly São Roque's) in which the spatial objects
+#   # would not be valid. related to
+#   # https://github.com/Rdatatable/data.table/issues/4217
+
+#   grid_with_data <- dplyr::left_join(
+#     grid_with_data,
+#     stat_grid[, c("ID_UNICO", "geom")],
+#     by = "ID_UNICO"
+#   )
+
+#   grid_with_data <- sf::st_sf(grid_with_data)
+
+#   # some sanity checks
+
+#   if (nrow(grid_with_data) < nrow(stat_grid)) {
+#     stop("aggregated grid has less cells than raw grid")
+#   }
+
+#   total_pop <- sum(grid_with_data$pop_total)
+#   total_pop_age <- sum(grid_with_data$idade_0a5) +
+#     sum(grid_with_data$idade_6a14) +
+#     sum(grid_with_data$idade_15a18) +
+#     sum(grid_with_data$idade_19a24) +
+#     sum(grid_with_data$idade_25a39) +
+#     sum(grid_with_data$idade_40a69) +
+#     sum(grid_with_data$idade_70mais)
+#   total_pop_color <- sum(grid_with_data$cor_branca) +
+#     sum(grid_with_data$cor_preta) +
+#     sum(grid_with_data$cor_amarela) +
+#     sum(grid_with_data$cor_parda) +
+#     sum(grid_with_data$cor_indigena)
+
+#   if (!dplyr::near(total_pop, total_pop_age)) {
+#     format(total_pop_age, nsmall = 10)
+#     format(total_pop, nsmall = 10)
+#     stop("total pop by age is different than total pop")
+#   }
+
+#   if (!dplyr::near(total_pop, total_pop_color)) {
+#     format(total_pop_color, nsmall = 10)
+#     format(total_pop, nsmall = 10)
+#     stop("total pop by age is different than total pop")
+#   }
+
+#   return(grid_with_data)
+# }
 
 # large_grids <- tar_read(large_stat_grids_with_data)
 # small_grids <- tar_read(small_stat_grids_with_data)

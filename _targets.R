@@ -1,4 +1,4 @@
-options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = 12)
+options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = 14)
 
 suppressPackageStartupMessages({
   library(targets)
@@ -119,6 +119,21 @@ list(
       individual_stat_grids,
       individual_tracts_with_data
     )
+  ),
+  tar_target(
+    large_stat_grids_with_data,
+    aggregate_data_to_large_stat_grid(
+      years,
+      pop_units,
+      individual_stat_grids,
+      individual_tracts_with_data
+    ),
+    pattern = map(
+      cross(years, pop_units),
+      individual_stat_grids,
+      individual_tracts_with_data
+    ),
+    deployment = "main"
   )
 
   # tar_target(

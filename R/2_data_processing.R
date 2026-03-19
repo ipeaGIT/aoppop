@@ -415,9 +415,7 @@ filter_tracts_with_data <- function(year, tracts_with_data, pop_unit) {
   individual_tracts <- sf::st_make_valid(individual_tracts)
 
   individual_tracts <- sf::st_transform(individual_tracts, 4674)
-
-  # TODO: ACHO QUE VAI TER QUE BOTAR ISSO AQUI
-  # individual_tracts <- sf::st_make_valid(individual_tracts)
+  individual_tracts <- sf::st_make_valid(individual_tracts)
 
   return(individual_tracts)
 }
@@ -575,6 +573,10 @@ filter_individual_stat_grids <- function(
   filtered_grid <- filtered_grid[!sf::st_is_empty(filtered_grid), ]
 
   filtered_grid <- dplyr::select(filtered_grid, c(ID_UNICO, pop_count = POP))
+
+  if (year == 2010) {
+    filtered_grid <- dplyr::rename(filtered_grid, geometry = geom)
+  }
 
   return(filtered_grid)
 }
