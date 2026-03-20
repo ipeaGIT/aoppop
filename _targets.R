@@ -2,6 +2,7 @@ options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = 14)
 
 suppressPackageStartupMessages({
   library(targets)
+  library(tarchetypes)
   library(ggplot2)
   library(geoarrow)
   library(sf)
@@ -27,6 +28,8 @@ tar_option_set(
 )
 
 tar_source()
+
+iter <- data.frame(res = 7:9)
 
 list(
   tar_target(h3_res, 7:9, iteration = "vector"),
@@ -105,7 +108,6 @@ list(
 
   # data interpolation
 
-  # eh pra 37 ficarem com NULL no final
   tar_target(
     small_stat_grids_with_data,
     aggregate_data_to_small_stat_grid(
@@ -134,57 +136,73 @@ list(
       individual_tracts_with_data
     ),
     deployment = "main"
+  ),
+
+  # we cannot create the patterns we want with the pattern argument of
+  # tar_target, because we have two "independent" multipliers of pop_units,
+  # which are h3_res and years. therefore, we use static branching here to
+  # filter only h3 grids of a specific resolution and branch over them to
+  # interpolate the data
+
+  tar_map(
+    values = iter,
+    tar_target(
+      hex_grids_res,
+      unlist(hex_grids[grepl(paste0("res_", res), hex_grids, fixed = TRUE)]),
+      format = "file"
+    ),
+    tar_target(
+      small_hexs_with_data_res,
+      aggregate_data_to_small_hexagons(
+        years,
+        pop_units,
+        small_stat_grids_with_data,
+        large_stat_grids_with_data,
+        hex_grids_res
+      ),
+      pattern = map(
+        cross(years, map(pop_units, hex_grids_res)),
+        small_stat_grids_with_data,
+        large_stat_grids_with_data
+      ),
+      format = "file"
+    )
   )
+  # ,
+
+  # # the dataframe below
+  # tar_target()
+  # tar_target(
+  #   small_hexagons_with_data,
+  #   aggregate_data_to_small_stat_grid(
+  #     years,
+  #     pop_units,
+  #     individual_stat_grids,
+  #     individual_tracts_with_data
+  #   ),
+  #   pattern = cross(
+  #     h3_res,
+
+  #     map(
+  #       cross(years, h3_res, pop_units),
+  #       individual_stat_grids,
+  #       individual_tracts_with_data
+  #     ),
+
+  #     map(
+  #       cross(years, map(cross(h3_res, pop_units), hex_grids)),
+  #       cross(small_stat_grids_with_data, h3_res),
+  #       cross(small_stat_grids_with_data, h3_res)
+  #     )
+  #   ),
+  #   format = "file"
+  # ),
 
   # tar_target(
-  #   large_stat_grids_indices,
-  #   which(purrr::map_int(individual_stat_grids, nrow) > 10000),
-  #   iteration = "vector"
-  # ),
-  # tar_target(
-  #   small_stat_grids,
-  #   individual_stat_grids[-large_stat_grids_indices]
-  # ),
-  # tar_target(
-  #   large_stat_grids,
-  #   individual_stat_grids[large_stat_grids_indices]
-  # ),
-  # tar_target(
-  #   small_tracts_with_data,
-  #   individual_tracts_with_data[-large_stat_grids_indices]
-  # ),
-  # tar_target(
-  #   large_tracts_with_data,
-  #   individual_tracts_with_data[large_stat_grids_indices]
-  # ),
-  # tar_target(
-  #   small_stat_grids_with_data,
-  #   aggregate_data_to_stat_grid(
-  #     small_stat_grids,
-  #     small_tracts_with_data,
-  #     manual_parallelization = FALSE
-  #   ),
-  #   pattern = map(small_stat_grids, small_tracts_with_data),
-  #   retrieval = "worker",
-  #   storage = "worker"
-  # ),
-  # tar_target(
-  #   large_stat_grids_with_data,
-  #   aggregate_data_to_stat_grid(
-  #     large_stat_grids,
-  #     large_tracts_with_data,
-  #     manual_parallelization = TRUE
-  #   ),
-  #   pattern = map(large_stat_grids, large_tracts_with_data),
-  #   garbage_collection = TRUE
-  # ),
-  # tar_target(
-  #   stat_grids_with_data,
-  #   bind_stat_grids(
-  #     large_stat_grids_with_data,
-  #     small_stat_grids_with_data,
-  #     large_stat_grids_indices
-  #   )
+  #   hex_grids,
+  #   create_hex_grid(h3_res, pop_units),
+  #   pattern = cross(h3_res, pop_units),
+  #   format = "file"
   # ),
 
   # # statistical grid to hexagons res 7
