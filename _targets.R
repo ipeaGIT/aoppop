@@ -148,7 +148,12 @@ list(
     values = iter,
     tar_target(
       hex_grids_res,
-      unlist(hex_grids[grepl(paste0("res_", res), hex_grids, fixed = TRUE)]),
+      unlist(hex_grids[grepl(paste0("res_", res), hex_grids, fixed = TRUE)])
+    ),
+    tar_target(
+      file_hex_grids_res,
+      hex_grids_res,
+      pattern = map(hex_grids_res),
       format = "file"
     ),
     tar_target(
@@ -158,10 +163,10 @@ list(
         pop_units,
         small_stat_grids_with_data,
         large_stat_grids_with_data,
-        hex_grids_res
+        file_hex_grids_res
       ),
       pattern = map(
-        cross(years, map(pop_units, hex_grids_res)),
+        cross(years, map(pop_units, file_hex_grids_res)),
         small_stat_grids_with_data,
         large_stat_grids_with_data
       ),

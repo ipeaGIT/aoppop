@@ -1,3 +1,5 @@
+# tracts -> stat grid ----------------------------------------------------
+
 # n_pop_unit <- 1 # 240
 # year <- 2022
 # pop_unit <- tar_read(pop_units)[n_pop_unit, ]
@@ -284,13 +286,15 @@ interpolate_tracts_to_grid <- function(
   return(grid_with_data)
 }
 
+# stat grid -> hexs ------------------------------------------------------
+
 # res <- 7
 # n_pop_unit <- 1
 # year <- 2010
 # pop_unit <- tar_read(pop_units)[n_pop_unit, ]
 # small_stat_grid <- tar_read(small_stat_grids_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
 # large_stat_grid <- tar_read(large_stat_grids_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
-# hex_grid_file <- tar_read_raw(paste0("hex_grids_res_", res))[n_pop_unit]
+# hex_grid_file <- tar_read_raw(paste0("file_hex_grids_res", res), branches = n_pop_unit)[[1]]
 aggregate_data_to_small_hexagons <- function(
   year,
   pop_unit,
@@ -310,6 +314,119 @@ aggregate_data_to_small_hexagons <- function(
     (res == 7 && nrow(stat_grid) > 28000) ||
       (res == 8 && nrow(stat_grid) > 4500) ||
       (res == 9 && nrow(stat_grid) > 2000)
+  ) {
+    return(NULL)
+  }
+
+  cli::cli_inform(
+    paste(
+      "Bringing data to hex grid res {.val {res}} for",
+      "unit {.val {pop_unit$treated_name}} and year {.val {year}}"
+    )
+  )
+
+  hex_grid <- sf::st_as_sf(arrow::open_dataset(hex_grid_file))
+
+  # filter out hexagons that don't intersect with the grid cells, otherwise they
+  # would significantly slow down the intersection process
+
+  filtered_hex_grid <- filter_hex_grid(hex_grid, stat_grid)
+
+  # similarly, filter out stat grid cells that don't intersect with the
+  # hexagons. this happens because the individual statistical grids are
+  # generated from the census tracts, which were filtered using a 3 km buffer
+  # around the pop units (so we could make sure that we would not lose any
+  # data). as a result, we can have some grid cells that are very far from the
+  # actual urban concentrations, especially in more rural areas, which would
+  # make them not intersect with the hexagons.
+
+  filtered_stat_grid <- filter_stat_grid(stat_grid, filtered_hex_grid)
+
+  # st_intersection can be quite slow with the large datasets we're using. so
+  # an optimization we can use is to find which grid cells are fully contained
+  # by the hexagons, create a dataset with these cells and their data and
+  # filter them out from the grid, reducing the workload of the intersection
+  # operation. then, we use these further filtered grid to calculate the
+  # intersections.
+  #
+  # we transform the crs because st_contains_properly() assumes coordinates are
+  # planar
+
+  filtered_hex_grid <- sf::st_transform(filtered_hex_grid, 5880)
+  filtered_stat_grid <- sf::st_transform(filtered_stat_grid, 5880)
+
+  contained_grid_cells <- find_contained_grid_cells(
+    filtered_hex_grid,
+    filtered_stat_grid
+  )
+
+  further_filtered_stat_grid <- filtered_stat_grid[
+    !(filtered_stat_grid$ID_UNICO %in% contained_grid_cells$ID_UNICO),
+  ]
+
+  contained_grid_cells[, ID_UNICO := NULL]
+
+  # before intersecting the hexs with the stat grid, we calculate the original
+  # size of the stat grid cells, which we're going to use later to calculate
+  # the number of people in each intersection slice. we assume the population
+  # is evenly distributed among the grid, so the final pop size in each slice
+  # is slice_area * people_in_stat_cell
+
+  further_filtered_stat_grid$grid_cell_area <- as.numeric(
+    sf::st_area(further_filtered_stat_grid)
+  )
+
+  # suppressed warning:
+  #  - attribute variables are assumed to be spatially constant throughout all
+  #    geometries
+
+  hex_grid_intersection <- suppressWarnings(
+    sf::st_intersection(filtered_hex_grid, further_filtered_stat_grid)
+  )
+
+  hex_grid_intersection <- interpolate_stat_grid_to_hexs(
+    hex_grid_intersection,
+    year
+  )
+
+  full_hexs_with_data <- calculate_hexs_totals(
+    contained_grid_cells,
+    hex_grid_intersection,
+    hex_grid,
+    year
+  )
+
+  filepath <- save_hexs_with_data(full_hexs_with_data, res, year, pop_unit)
+
+  return(filepath)
+}
+
+# res <- 7
+# n_pop_unit <- 170 # alguns pra res7: 170, 240, 376
+# year <- 2010
+# pop_unit <- tar_read(pop_units)[n_pop_unit, ]
+# small_stat_grid <- tar_read(small_stat_grids_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
+# large_stat_grid <- tar_read(large_stat_grids_with_data, branches = n_pop_unit + ifelse(year == 2010, 0, 376))[[1]]
+# hex_grid_file <- tar_read_raw(paste0("hex_grids_res_", res))[n_pop_unit]
+aggregate_data_to_large_hexagons <- function(
+  year,
+  pop_unit,
+  small_stat_grid,
+  large_stat_grid,
+  hex_grid_file
+) {
+  res <- as.integer(stringr::str_extract(hex_grid_file, "(?<=\\/res_)\\d{1}"))
+
+  stat_grid <- if (is.null(large_stat_grid)) {
+    small_stat_grid
+  } else {
+    large_stat_grid
+  }
+
+  if (
+    (res == 7 && nrow(stat_grid) <= 28000) ||
+      (res == 8 && nrow(stat_grid) <= 4500) ||
+      (res == 9 && nrow(stat_grid) <= 2000)
   ) {
     return(NULL)
   }
@@ -351,9 +468,10 @@ aggregate_data_to_small_hexagons <- function(
 
   # st_intersection can be quite slow with the large datasets we're using. so
   # an optimization we can use is to find which grid cells are fully contained
-  # by the hexagons, create a dataset with these cells and filter them out from
-  # the grid, reducing the workload of the intersection operation. then, we use
-  # these further filtered grid to calculate the intersections.
+  # by the hexagons, create a dataset with these cells and their data and
+  # filter them out from the grid, reducing the workload of the intersection
+  # operation. then, we use these further filtered grid to calculate the
+  # intersections.
   #
   # we transform the crs because st_contains_properly() assumes coordinates are
   # planar
@@ -377,33 +495,39 @@ aggregate_data_to_small_hexagons <- function(
   containing_hexs[, ID_UNICO := filtered_stat_grid[cell_index, ]$ID_UNICO]
   containing_hexs[, cell_index := NULL]
 
-  # again, using dplyr's left_join() instead of data.table's because the latter
-  # can mess up with the object's attributes, which end up making the object
-  # invalid.
-  # here, we preserve the geometry of the grid cell because later we're going
-  # to join this table with the intersections between the hexagons and the
-  # intersections. the intersections table contain the geometry of the
-  # intersections, and, in this case of contained cells, we can think as the
-  # geometry of the grid cell as the geometry of the intersection
+  stat_grid_cols <- names(filtered_stat_grid)
 
-  # TODO: ACHO QUE NÃO PRECISA DA GEOMETRIA AQUI
-  containing_hexs <- dplyr::left_join(
-    containing_hexs,
-    filtered_stat_grid,
-    by = "ID_UNICO"
-  )
-  containing_hexs <- sf::st_sf(containing_hexs)
-  # sf::st_geometry(containing_hexs) <- "geometry"
+  desired_cols <- setdiff(stat_grid_cols, c("ID_UNICO", "is_empty", "geometry"))
+
+  join_expr <- glue::glue("{desired_cols} = i.{desired_cols}")
+  join_expr <- paste(join_expr, collapse = ", ")
+  join_expr <- glue::glue("`:=`({join_expr})")
+  join_expr <- parse(text = join_expr)
+
+  containing_hexs[filtered_stat_grid, on = "ID_UNICO", eval(join_expr)]
+
+  containing_hexs[, ID_UNICO := NULL]
+
+  # # TODO: ACHO QUE NÃO PRECISA DA GEOMETRIA AQUI
+  # containing_hexs <- dplyr::left_join(
+  #   containing_hexs,
+  #   filtered_stat_grid,
+  #   by = "ID_UNICO"
+  # )
+  # containing_hexs <- sf::st_sf(containing_hexs)
 
   contained_cells_indices <- unlist(contains)
   further_filtered_stat_grid <- filtered_stat_grid[-contained_cells_indices, ]
-  # further_filtered_stat_grid <- sf::st_sf(further_filtered_stat_grid)
+
+  # before intersecting the hexs with the stat grid, we calculate the original
+  # size of the stat grid cells, which we're going to use later to calculate
+  # the number of people in each intersection slice. we assume the population
+  # is evenly distributed among the grid, so the final pop size in each slice
+  # is slice_area * people_in_stat_cell
 
   further_filtered_stat_grid$grid_cell_area <- as.numeric(
     sf::st_area(further_filtered_stat_grid)
   )
-
-  # TODO: CONTINUAR DAQUI
 
   # suppressed warning:
   #  - attribute variables are assumed to be spatially constant throughout all
@@ -412,6 +536,74 @@ aggregate_data_to_small_hexagons <- function(
   hex_grid_intersection <- suppressWarnings(
     sf::st_intersection(filtered_hex_grid, further_filtered_stat_grid)
   )
+  hex_grid_intersection <- sf::st_make_valid(hex_grid_intersection)
+
+  hex_grid_intersection$intersection_area <- as.numeric(
+    sf::st_area(hex_grid_intersection)
+  )
+
+  data.table::setDT(hex_grid_intersection)
+
+  hex_grid_intersection[, prop_grid_area := intersection_area / grid_cell_area]
+
+  # we first calculate the number of people per group in each intersection, then
+  # we bind the "contained grid cells" dataset and sum the total count per group
+  # in each hexagon
+
+  colnames <- names(hex_grid_intersection)
+
+  cols_to_sum <- c(
+    "pop_total",
+    colnames[grepl("cor", colnames)],
+    colnames[grepl("idade", colnames)]
+  )
+
+  if (year == 2010) {
+    cols_to_sum <- c(cols_to_sum, "renda_total")
+  }
+
+  hex_grid_intersection[,
+    (cols_to_sum) := lapply(.SD, function(x) x * prop_grid_area),
+    .SDcols = cols_to_sum
+  ]
+
+  desired_cols <- c("h3_address", cols_to_sum)
+  hex_grid_intersection[,
+    setdiff(names(hex_grid_intersection), desired_cols) := NULL
+  ]
+
+  intersections <- rbind(containing_hexs, hex_grid_intersection)
+
+  hexs_with_data <- intersections[,
+    lapply(.SD, sum),
+    .SDcols = cols_to_sum,
+    by = h3_address
+  ]
+
+  # since we used filtered_hex_grid, and not hex_grid, to calculate the
+  # intersections, we need to merge hexs_with_data with the complete hex grid.
+  # we fill the columns of hexagons "without data" with the appropriate values.
+
+  data_cols <- setdiff(names(hexs_with_data), "h3_address")
+
+  full_hexs_with_data <- dplyr::left_join(
+    hex_grid,
+    hexs_with_data,
+    by = "h3_address"
+  )
+
+  data.table::setDT(full_hexs_with_data)
+  full_hexs_with_data[is.na(pop_total), (data_cols) := 0]
+
+  if (year == 2010) {
+    full_hexs_with_data[, renda_per_capita := renda_total / pop_total]
+  }
+
+  full_hexs_with_data <- sf::st_sf(full_hexs_with_data)
+
+  filepath <- save_hexs_with_data(full_hexs_with_data, res, year)
+
+  return(filepath)
 
   # if (manual_parallelization) {
   #   if (res == 9 && nrow(stat_grid) > 10000) {
@@ -433,100 +625,247 @@ aggregate_data_to_small_hexagons <- function(
   #   sf::st_intersection(filtered_hex_grid, further_filtered_stat_grid)
   # }
 
-  # we bind the contained cells dataset with the intersection dataset before
-  # proceeding with the calculations.
+  # TODO: APAGAR DAQUI PRA BAIXO
 
-  intersections <- rbind(containing_hexs, hex_grid_intersection)
+  # # we bind the contained cells dataset with the intersection dataset before
+  # # proceeding with the calculations.
 
-  intersections <- sf::st_make_valid(intersections)
-  intersections$intersect_area <- as.numeric(sf::st_area(intersections))
+  # intersections <- rbind(containing_hexs, hex_grid_intersection)
 
-  data.table::setDT(intersections)
+  # intersections <- sf::st_make_valid(intersections)
+  # intersections$intersect_area <- as.numeric(sf::st_area(intersections))
 
-  # we also change the name of some columns and calculate the proportion of each
-  # age, race and income group in each intersection.
+  # data.table::setDT(intersections)
 
-  data.table::setnames(
-    intersections,
-    old = c("pop_total", "renda"),
-    new = c("grid_cell_total_pop", "grid_cell_income"),
-    skip_absent = TRUE
+  # # we also change the name of some columns and calculate the proportion of each
+  # # age, race and income group in each intersection.
+
+  # data.table::setnames(
+  #   intersections,
+  #   old = c("pop_total", "renda"),
+  #   new = c("grid_cell_total_pop", "grid_cell_income"),
+  #   skip_absent = TRUE
+  # )
+
+  # colnames <- names(intersections)
+
+  # age_cols <- colnames[grepl("idade", colnames)]
+  # age_prop_cols <- paste0(age_cols, "_prop")
+
+  # intersections[,
+  #   (age_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
+  #   .SDcols = age_cols
+  # ]
+
+  # race_cols <- colnames[grepl("cor", colnames)]
+  # race_prop_cols <- paste0(race_cols, "_prop")
+
+  # intersections[,
+  #   (race_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
+  #   .SDcols = race_cols
+  # ]
+
+  # intersections[, c(age_cols, race_cols) := NULL]
+
+  # # the rest of the process (the calculations themselves) are the same conducted
+  # # in aggregate_data_to_stat_grid()
+
+  # intersections[, stat_cell_total_area := sum(intersect_area), by = ID_UNICO]
+  # intersections[, prop_stat_cell_area := intersect_area / stat_cell_total_area]
+
+  # # calculating total income in each intersection. we assume that income is
+  # # evenly distributed among individuals living in the same statistical grid
+  # # cell, so it's proportional to the share of the cell in the intersection.
+
+  # intersections[,
+  #   `:=`(
+  #     intersect_population = prop_stat_cell_area * grid_cell_total_pop,
+  #     intersect_men = prop_stat_cell_area * grid_cell_men,
+  #     intersect_women = prop_stat_cell_area * grid_cell_women
+  #   )
+  # ]
+  # intersections[, intersect_income := prop_stat_cell_area * grid_cell_income]
+
+  # # to calculate the population count by race and age group in each
+  # # intersection, we just need to multiply the population in each intersection
+  # # by the proportions of each group, previously calculated
+
+  # group_prop_cols <- c(age_prop_cols, race_prop_cols)
+  # new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
+
+  # intersections[,
+  #   (new_colnames) := lapply(.SD, function(x) x * intersect_population),
+  #   .SDcols = group_prop_cols
+  # ]
+
+  # # the total population count, count per group and total income in each grid
+  # # cell are the sum of each of the variables calculated above by hexagon
+
+  # pop_cols <- paste0("intersect_", c("population", "men", "women"))
+
+  # cols_to_sum <- c(pop_cols, "intersect_income", new_colnames)
+  # final_colnames <- sub("intersect_", "", cols_to_sum)
+  # final_colnames[1:4] <- c("pop_total", "homens", "mulheres", "renda_total")
+
+  # hexs_with_data <- intersections[,
+  #   lapply(.SD, sum),
+  #   by = h3_address,
+  #   .SDcols = cols_to_sum
+  # ]
+
+  # data.table::setnames(hexs_with_data, old = cols_to_sum, new = final_colnames)
+
+  # # finally, since we used filtered_hex_grid, and not hex_grid, to calculate the
+  # # intersections, we need to merge our dataset "with data" with the complete
+  # # hex grid. we fill the columns of hexagons "without data" with the
+  # # appropriate values.
+
+  # data_cols <- setdiff(names(hexs_with_data), "h3_address")
+
+  # full_hexs_with_data <- dplyr::left_join(
+  #   hex_grid,
+  #   hexs_with_data,
+  #   by = "h3_address"
+  # )
+
+  # data.table::setDT(full_hexs_with_data)
+  # full_hexs_with_data[is.na(pop_total), (data_cols) := 0]
+  # full_hexs_with_data[, renda_per_capita := renda_total / pop_total]
+
+  # full_hexs_with_data <- sf::st_sf(full_hexs_with_data)
+
+  # # save object as RDS and return the path
+
+  # hex_dir <- file.path(
+  #   "../../data/acesso_oport_v2/hex_grids_with_data",
+  #   paste0("res_", res),
+  #   "2010"
+  # )
+  # if (!dir.exists(hex_dir)) {
+  #   dir.create(hex_dir, recursive = TRUE)
+  # }
+
+  # basename <- paste0(pop_unit$code_pop_unit, "_", pop_unit$treated_name, ".rds")
+  # filepath <- file.path(hex_dir, basename)
+
+  # saveRDS(full_hexs_with_data, filepath)
+
+  # return(filepath)
+}
+
+filter_hex_grid <- function(hex_grid, stat_grid) {
+  unified_grid <- sf::st_union(stat_grid)
+  unified_grid <- sf::st_make_valid(unified_grid)
+
+  intersecting_hexs <- sf::st_intersects(hex_grid, unified_grid)
+  do_intersect <- lengths(intersecting_hexs) > 0
+
+  filtered_hex_grid <- hex_grid[do_intersect, ]
+
+  return(filtered_hex_grid)
+}
+
+filter_stat_grid <- function(stat_grid, filtered_hex_grid) {
+  unified_filtered_hexs <- sf::st_union(filtered_hex_grid)
+
+  intersecting_grid_cells <- sf::st_intersects(stat_grid, unified_filtered_hexs)
+  do_intersect <- lengths(intersecting_grid_cells) > 0
+
+  filtered_stat_grid <- stat_grid[do_intersect, ]
+
+  return(filtered_stat_grid)
+}
+
+find_contained_grid_cells <- function(filtered_hex_grid, filtered_stat_grid) {
+  contains <- sf::st_contains_properly(
+    filtered_hex_grid,
+    filtered_stat_grid
   )
 
-  colnames <- names(intersections)
-
-  age_cols <- colnames[grepl("idade", colnames)]
-  age_prop_cols <- paste0(age_cols, "_prop")
-
-  intersections[,
-    (age_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
-    .SDcols = age_cols
+  contained_grid_cells <- data.table::data.table(
+    h3_address = filtered_hex_grid$h3_address,
+    contains = unclass(contains)
+  )
+  contained_grid_cells <- contained_grid_cells[,
+    .(cell_index = contains[[1]]),
+    by = h3_address
   ]
+  contained_grid_cells[, ID_UNICO := filtered_stat_grid[cell_index, ]$ID_UNICO]
+  contained_grid_cells[, cell_index := NULL]
 
-  race_cols <- colnames[grepl("cor", colnames)]
-  race_prop_cols <- paste0(race_cols, "_prop")
+  stat_grid_cols <- names(filtered_stat_grid)
 
-  intersections[,
-    (race_prop_cols) := lapply(.SD, function(x) x / grid_cell_total_pop),
-    .SDcols = race_cols
-  ]
+  desired_cols <- setdiff(stat_grid_cols, c("ID_UNICO", "is_empty", "geometry"))
 
-  intersections[, c(age_cols, race_cols) := NULL]
+  join_expr <- glue::glue("{desired_cols} = i.{desired_cols}")
+  join_expr <- paste(join_expr, collapse = ", ")
+  join_expr <- glue::glue("`:=`({join_expr})")
+  join_expr <- parse(text = join_expr)
 
-  # the rest of the process (the calculations themselves) are the same conducted
-  # in aggregate_data_to_stat_grid()
+  contained_grid_cells[filtered_stat_grid, on = "ID_UNICO", eval(join_expr)]
 
-  intersections[, stat_cell_total_area := sum(intersect_area), by = ID_UNICO]
-  intersections[, prop_stat_cell_area := intersect_area / stat_cell_total_area]
+  return(contained_grid_cells[])
+}
 
-  # calculating total income in each intersection. we assume that income is
-  # evenly distributed among individuals living in the same statistical grid
-  # cell, so it's proportional to the share of the cell in the intersection.
+interpolate_stat_grid_to_hexs <- function(hex_grid_intersection, year) {
+  hex_grid_intersection <- sf::st_make_valid(hex_grid_intersection)
 
-  intersections[,
-    `:=`(
-      intersect_population = prop_stat_cell_area * grid_cell_total_pop,
-      intersect_men = prop_stat_cell_area * grid_cell_men,
-      intersect_women = prop_stat_cell_area * grid_cell_women
-    )
-  ]
-  intersections[, intersect_income := prop_stat_cell_area * grid_cell_income]
+  hex_grid_intersection$intersection_area <- as.numeric(
+    sf::st_area(hex_grid_intersection)
+  )
 
-  # to calculate the population count by race and age group in each
-  # intersection, we just need to multiply the population in each intersection
-  # by the proportions of each group, previously calculated
+  data.table::setDT(hex_grid_intersection)
 
-  group_prop_cols <- c(age_prop_cols, race_prop_cols)
-  new_colnames <- paste0("intersect_", sub("_prop", "", group_prop_cols))
+  hex_grid_intersection[, prop_grid_area := intersection_area / grid_cell_area]
 
-  intersections[,
-    (new_colnames) := lapply(.SD, function(x) x * intersect_population),
-    .SDcols = group_prop_cols
-  ]
+  # we first calculate the number of people per group in each intersection, then
+  # we bind the "contained grid cells" dataset and sum the total count per group
+  # in each hexagon
 
-  # the total population count, count per group and total income in each grid
-  # cell are the sum of each of the variables calculated above by hexagon
+  colnames <- names(hex_grid_intersection)
 
-  pop_cols <- paste0("intersect_", c("population", "men", "women"))
+  cols_to_sum <- c(
+    "pop_total",
+    colnames[grepl("cor", colnames)],
+    colnames[grepl("idade", colnames)]
+  )
 
-  cols_to_sum <- c(pop_cols, "intersect_income", new_colnames)
-  final_colnames <- sub("intersect_", "", cols_to_sum)
-  final_colnames[1:4] <- c("pop_total", "homens", "mulheres", "renda_total")
+  if (year == 2010) {
+    cols_to_sum <- c(cols_to_sum, "renda_total")
+  }
 
-  hexs_with_data <- intersections[,
-    lapply(.SD, sum),
-    by = h3_address,
+  hex_grid_intersection[,
+    (cols_to_sum) := lapply(.SD, function(x) x * prop_grid_area),
     .SDcols = cols_to_sum
   ]
 
-  data.table::setnames(hexs_with_data, old = cols_to_sum, new = final_colnames)
+  desired_cols <- c("h3_address", cols_to_sum)
+  hex_grid_intersection[,
+    setdiff(names(hex_grid_intersection), desired_cols) := NULL
+  ]
 
-  # finally, since we used filtered_hex_grid, and not hex_grid, to calculate the
-  # intersections, we need to merge our dataset "with data" with the complete
-  # hex grid. we fill the columns of hexagons "without data" with the
-  # appropriate values.
+  return(hex_grid_intersection[])
+}
 
-  data_cols <- setdiff(names(hexs_with_data), "h3_address")
+calculate_hexs_totals <- function(
+  contained_grid_cells,
+  hex_grid_intersection,
+  hex_grid,
+  year
+) {
+  intersections <- rbind(contained_grid_cells, hex_grid_intersection)
+
+  cols_to_sum <- setdiff(names(intersections), "h3_address")
+
+  hexs_with_data <- intersections[,
+    lapply(.SD, sum),
+    .SDcols = cols_to_sum,
+    by = h3_address
+  ]
+
+  # since we used filtered_hex_grid, and not hex_grid, to calculate the
+  # intersections, we need to merge hexs_with_data with the complete hex grid.
+  # we fill the columns of hexagons "without data" with the appropriate values.
 
   full_hexs_with_data <- dplyr::left_join(
     hex_grid,
@@ -535,26 +874,44 @@ aggregate_data_to_small_hexagons <- function(
   )
 
   data.table::setDT(full_hexs_with_data)
-  full_hexs_with_data[is.na(pop_total), (data_cols) := 0]
-  full_hexs_with_data[, renda_per_capita := renda_total / pop_total]
+  full_hexs_with_data[is.na(pop_total), (cols_to_sum) := 0]
+
+  if (year == 2010) {
+    full_hexs_with_data[, renda_per_capita := renda_total / pop_total]
+  }
 
   full_hexs_with_data <- sf::st_sf(full_hexs_with_data)
 
-  # save object as RDS and return the path
+  return(full_hexs_with_data)
+}
 
+save_hexs_with_data <- function(full_hexs_with_data, res, year, pop_unit) {
   hex_dir <- file.path(
-    "../../data/acesso_oport_v2/hex_grids_with_data",
-    paste0("res_", res),
-    "2010"
+    Sys.getenv("USERS_DATA_PATH"),
+    "Proj_acess_oport/data/acesso_oport_v2/hex_grids_with_data",
+    glue::glue("res_{res}"),
+    year
   )
+
   if (!dir.exists(hex_dir)) {
     dir.create(hex_dir, recursive = TRUE)
   }
 
-  basename <- paste0(pop_unit$code_pop_unit, "_", pop_unit$treated_name, ".rds")
+  basename <- glue::glue(
+    "{pop_unit$code_pop_unit}_{pop_unit$treated_name}.parquet"
+  )
   filepath <- file.path(hex_dir, basename)
 
-  saveRDS(full_hexs_with_data, filepath)
+  # writing to local tempfile then moving to the server is faster than writing
+  # directly to the server
+
+  local_tmpfile <- tempfile(fileext = ".parquet")
+
+  arrow::write_parquet(full_hexs_with_data, local_tmpfile)
+
+  file.copy(local_tmpfile, filepath, overwrite = TRUE)
+
+  unlink(local_tmpfile)
 
   return(filepath)
 }
