@@ -35,28 +35,40 @@ prepare_census_data <- function(year) {
     # more idiomatic way of calculating the totals like this would be to use
     # rowwise(), I suppose, but arrow dplyr queries don't support it
 
-    expr <- parse(text = paste(paste0("pessoa13_V0", 23:39), collapse = "+"))
-    census_data <- dplyr::mutate(census_data, idade_0a5 = eval(expr))
+    expr <- parse(text = paste(paste0("pessoa13_V0", 23:38), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_0a4 = eval(expr))
 
-    expr <- parse(text = paste(paste0("pessoa13_V0", 40:48), collapse = "+"))
-    census_data <- dplyr::mutate(census_data, idade_6a14 = eval(expr))
+    expr <- parse(text = paste(paste0("pessoa13_V0", 39:43), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_5a9 = eval(expr))
 
-    expr <- parse(text = paste(paste0("pessoa13_V0", 49:52), collapse = "+"))
-    census_data <- dplyr::mutate(census_data, idade_15a18 = eval(expr))
+    expr <- parse(text = paste(paste0("pessoa13_V0", 44:48), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_10a14 = eval(expr))
 
-    expr <- parse(text = paste(paste0("pessoa13_V0", 53:58), collapse = "+"))
-    census_data <- dplyr::mutate(census_data, idade_19a24 = eval(expr))
+    expr <- parse(text = paste(paste0("pessoa13_V0", 49:53), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_15a19 = eval(expr))
 
-    expr <- parse(text = paste(paste0("pessoa13_V0", 59:73), collapse = "+"))
-    census_data <- dplyr::mutate(census_data, idade_25a39 = eval(expr))
+    expr <- parse(text = paste(paste0("pessoa13_V0", 54:58), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_20a24 = eval(expr))
+
+    expr <- parse(text = paste(paste0("pessoa13_V0", 59:63), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_25a29 = eval(expr))
+
+    expr <- parse(text = paste(paste0("pessoa13_V0", 64:73), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_30a39 = eval(expr))
+
+    expr <- parse(text = paste(paste0("pessoa13_V0", 74:83), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_40a49 = eval(expr))
+
+    expr <- parse(text = paste(paste0("pessoa13_V0", 84:93), collapse = "+"))
+    census_data <- dplyr::mutate(census_data, idade_50a59 = eval(expr))
 
     expr <- parse(
       text = paste(
-        paste0("pessoa13_V", formatC(74:103, width = 3, flag = "0")),
+        paste0("pessoa13_V", formatC(94:103, width = 3, flag = "0")),
         collapse = "+"
       )
     )
-    census_data <- dplyr::mutate(census_data, idade_40a69 = eval(expr))
+    census_data <- dplyr::mutate(census_data, idade_60a69 = eval(expr))
 
     expr <- parse(text = paste(paste0("pessoa13_V", 104:134), collapse = "+"))
     census_data <- dplyr::mutate(census_data, idade_70mais = eval(expr))

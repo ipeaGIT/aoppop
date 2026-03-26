@@ -32,7 +32,6 @@ tar_source()
 iter <- data.frame(res = 7:9)
 
 list(
-  tar_target(h3_res, 7:9, iteration = "vector"),
   tar_target(years, c(2010, 2022)),
 
   # spatial manipulation
@@ -57,12 +56,6 @@ list(
     iteration = "group"
   ),
 
-  tar_target(
-    hex_grids,
-    create_hex_grid(h3_res, pop_units),
-    pattern = cross(h3_res, pop_units),
-    format = "file"
-  ),
   tar_target(
     pop_units_tracts,
     subset_pop_units_tracts(census_tracts, pop_units),
@@ -109,8 +102,8 @@ list(
   # data interpolation
 
   tar_target(
-    small_stat_grids_with_data,
-    aggregate_data_to_small_stat_grid(
+    stat_grids_with_data,
+    aggregate_data_to_stat_grid(
       years,
       pop_units,
       individual_stat_grids,
@@ -121,21 +114,6 @@ list(
       individual_stat_grids,
       individual_tracts_with_data
     )
-  ),
-  tar_target(
-    large_stat_grids_with_data,
-    aggregate_data_to_large_stat_grid(
-      years,
-      pop_units,
-      individual_stat_grids,
-      individual_tracts_with_data
-    ),
-    pattern = map(
-      cross(years, pop_units),
-      individual_stat_grids,
-      individual_tracts_with_data
-    ),
-    deployment = "main"
   ),
 
   # we cannot create the patterns we want with the pattern argument of
@@ -148,327 +126,23 @@ list(
     values = iter,
     tar_target(
       hex_grids_res,
-      unlist(hex_grids[grepl(paste0("res_", res), hex_grids, fixed = TRUE)])
-    ),
-    tar_target(
-      file_hex_grids_res,
-      hex_grids_res,
-      pattern = map(hex_grids_res),
+      create_hex_grid(res, pop_units),
+      pattern = map(pop_units),
       format = "file"
     ),
     tar_target(
-      small_hexs_with_data_res,
-      aggregate_data_to_small_hexagons(
+      hexs_with_data_res,
+      aggregate_data_to_hexagons(
         years,
         pop_units,
-        small_stat_grids_with_data,
-        large_stat_grids_with_data,
-        file_hex_grids_res
+        stat_grids_with_data,
+        hex_grids_res
       ),
       pattern = map(
-        cross(years, map(pop_units, file_hex_grids_res)),
-        small_stat_grids_with_data,
-        large_stat_grids_with_data
+        cross(years, map(pop_units, hex_grids_res)),
+        stat_grids_with_data
       ),
       format = "file"
     )
   )
-  # ,
-
-  # # the dataframe below
-  # tar_target()
-  # tar_target(
-  #   small_hexagons_with_data,
-  #   aggregate_data_to_small_stat_grid(
-  #     years,
-  #     pop_units,
-  #     individual_stat_grids,
-  #     individual_tracts_with_data
-  #   ),
-  #   pattern = cross(
-  #     h3_res,
-
-  #     map(
-  #       cross(years, h3_res, pop_units),
-  #       individual_stat_grids,
-  #       individual_tracts_with_data
-  #     ),
-
-  #     map(
-  #       cross(years, map(cross(h3_res, pop_units), hex_grids)),
-  #       cross(small_stat_grids_with_data, h3_res),
-  #       cross(small_stat_grids_with_data, h3_res)
-  #     )
-  #   ),
-  #   format = "file"
-  # ),
-
-  # tar_target(
-  #   hex_grids,
-  #   create_hex_grid(h3_res, pop_units),
-  #   pattern = cross(h3_res, pop_units),
-  #   format = "file"
-  # ),
-
-  # # statistical grid to hexagons res 7
-  # tar_target(
-  #   large_indices_for_res_7,
-  #   {
-  #     large <- dplyr::filter(
-  #       pop_units,
-  #       code_pop_unit %in% c(3550308, 5300108, 4106902, 3304557)
-  #     )
-  #     indices <- large$tar_group
-  #     indices
-  #   }
-  # ),
-  # tar_target(
-  #   small_stat_grids_with_data_res_7,
-  #   stat_grids_with_data[-large_indices_for_res_7],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_stat_grids_with_data_res_7,
-  #   stat_grids_with_data[large_indices_for_res_7],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_hex_grids_res_7,
-  #   head(hex_grids, 376)[-large_indices_for_res_7],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_hex_grids_res_7,
-  #   head(hex_grids, 376)[large_indices_for_res_7],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_pop_units_res_7,
-  #   {
-  #     units <- pop_units
-  #     units <- units[!units$tar_group %in% large_indices_for_res_7, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   large_pop_units_res_7,
-  #   {
-  #     units <- pop_units
-  #     units <- units[units$tar_group %in% large_indices_for_res_7, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   small_hexagons_with_data_res_7,
-  #   aggregate_data_to_hexagons(
-  #     small_pop_units_res_7,
-  #     small_stat_grids_with_data_res_7,
-  #     small_hex_grids_res_7,
-  #     res = 7,
-  #     manual_parallelization = FALSE
-  #   ),
-  #   pattern = map(
-  #     small_pop_units_res_7,
-  #     small_stat_grids_with_data_res_7,
-  #     small_hex_grids_res_7
-  #   ),
-  #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list",
-  #   format = "file"
-  # ),
-  # tar_target(
-  #   large_hexagons_with_data_res_7,
-  #   aggregate_data_to_hexagons(
-  #     large_pop_units_res_7,
-  #     large_stat_grids_with_data_res_7,
-  #     large_hex_grids_res_7,
-  #     res = 7,
-  #     manual_parallelization = TRUE
-  #   ),
-  #   pattern = map(
-  #     large_pop_units_res_7,
-  #     large_stat_grids_with_data_res_7,
-  #     large_hex_grids_res_7
-  #   ),
-  #   garbage_collection = TRUE,
-  #   iteration = "list",
-  #   format = "file"
-  # ),
-
-  # # statistical grid to hexagons res 8
-  # tar_target(
-  #   large_indices_for_res_8,
-  #   which(vapply(individual_stat_grids, nrow, numeric(1)) > 4500)
-  # ),
-  # tar_target(
-  #   small_stat_grids_with_data_res_8,
-  #   stat_grids_with_data[-large_indices_for_res_8],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_stat_grids_with_data_res_8,
-  #   stat_grids_with_data[large_indices_for_res_8],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_hex_grids_res_8,
-  #   hex_grids[377:752][-large_indices_for_res_8],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_hex_grids_res_8,
-  #   hex_grids[377:752][large_indices_for_res_8],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_pop_units_res_8,
-  #   {
-  #     units <- pop_units
-  #     units <- units[!units$tar_group %in% large_indices_for_res_8, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   large_pop_units_res_8,
-  #   {
-  #     units <- pop_units
-  #     units <- units[units$tar_group %in% large_indices_for_res_8, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   small_hexagons_with_data_res_8,
-  #   aggregate_data_to_hexagons(
-  #     small_pop_units_res_8,
-  #     small_stat_grids_with_data_res_8,
-  #     small_hex_grids_res_8,
-  #     res = 8,
-  #     manual_parallelization = FALSE
-  #   ),
-  #   pattern = map(
-  #     small_pop_units_res_8,
-  #     small_stat_grids_with_data_res_8,
-  #     small_hex_grids_res_8
-  #   ),
-  #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list",
-  #   format = "file"
-  # ),
-  # tar_target(
-  #   large_hexagons_with_data_res_8,
-  #   aggregate_data_to_hexagons(
-  #     large_pop_units_res_8,
-  #     large_stat_grids_with_data_res_8,
-  #     large_hex_grids_res_8,
-  #     res = 8,
-  #     manual_parallelization = TRUE
-  #   ),
-  #   pattern = map(
-  #     large_pop_units_res_8,
-  #     large_stat_grids_with_data_res_8,
-  #     large_hex_grids_res_8
-  #   ),
-  #   garbage_collection = TRUE,
-  #   iteration = "list",
-  #   format = "file"
-  # ),
-
-  # # statistical grid to hexagons res 9
-  # tar_target(
-  #   large_indices_for_res_9,
-  #   which(vapply(individual_stat_grids, nrow, numeric(1)) > 2000)
-  # ),
-  # tar_target(
-  #   small_stat_grids_with_data_res_9,
-  #   stat_grids_with_data[-large_indices_for_res_9],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_stat_grids_with_data_res_9,
-  #   stat_grids_with_data[large_indices_for_res_9],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_hex_grids_res_9,
-  #   tail(hex_grids, 376)[-large_indices_for_res_9],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   large_hex_grids_res_9,
-  #   tail(hex_grids, 376)[large_indices_for_res_9],
-  #   iteration = "list"
-  # ),
-  # tar_target(
-  #   small_pop_units_res_9,
-  #   {
-  #     units <- pop_units
-  #     units <- units[!units$tar_group %in% large_indices_for_res_9, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   large_pop_units_res_9,
-  #   {
-  #     units <- pop_units
-  #     units <- units[units$tar_group %in% large_indices_for_res_9, ]
-  #     units$tar_group <- seq.int(1, nrow(units))
-  #     units <- sf::st_drop_geometry(units)
-  #     units
-  #   },
-  #   iteration = "group"
-  # ),
-  # tar_target(
-  #   small_hexagons_with_data_res_9,
-  #   aggregate_data_to_hexagons(
-  #     small_pop_units_res_9,
-  #     small_stat_grids_with_data_res_9,
-  #     small_hex_grids_res_9,
-  #     res = 9,
-  #     manual_parallelization = FALSE
-  #   ),
-  #   pattern = map(
-  #     small_pop_units_res_9,
-  #     small_stat_grids_with_data_res_9,
-  #     small_hex_grids_res_9
-  #   ),
-  #   retrieval = "worker",
-  #   storage = "worker",
-  #   iteration = "list",
-  #   format = "file"
-  # ),
-  # tar_target(
-  #   large_hexagons_with_data_res_9,
-  #   aggregate_data_to_hexagons(
-  #     large_pop_units_res_9,
-  #     large_stat_grids_with_data_res_9,
-  #     large_hex_grids_res_9,
-  #     res = 9,
-  #     manual_parallelization = TRUE
-  #   ),
-  #   pattern = map(
-  #     large_pop_units_res_9,
-  #     large_stat_grids_with_data_res_9,
-  #     large_hex_grids_res_9
-  #   ),
-  #   garbage_collection = TRUE,
-  #   iteration = "list",
-  #   format = "file"
-  # )
 )

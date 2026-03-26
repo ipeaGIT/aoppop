@@ -255,9 +255,10 @@ subset_pop_units_tracts <- function(census_tracts, pop_units) {
   # using a slightly larger buffer just to make sure that all census tracts that
   # intersect with a grid cell are included, otherwise we would lose information
   # when reaggregating data from the tracts to the grid
+
   intersections <- sf::st_intersects(
     census_tracts,
-    sf::st_buffer(sf::st_union(pop_units), 3000)
+    sf::st_buffer(sf::st_union(pop_units), units::set_units(3000, "meters"))
   )
   do_intersect <- lengths(intersections) > 0
 
@@ -266,7 +267,7 @@ subset_pop_units_tracts <- function(census_tracts, pop_units) {
   return(filtered_tracts)
 }
 
-# res <- tar_read(h3_res)[1]
+# res <- 7
 # pop_unit <- tar_read(pop_units)[23, ]
 create_hex_grid <- function(res, pop_unit) {
   cli::cli_inform(
