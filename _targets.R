@@ -1,12 +1,15 @@
-options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = 14)
-
 suppressPackageStartupMessages({
   library(targets)
   library(tarchetypes)
   library(ggplot2)
   library(geoarrow)
+  library(parallelly)
+  library(duckspatial)
   library(sf)
 })
+
+ncores <- floor(.50 * parallelly::freeCores()[1])
+options(TARGETS_SHOW_PROGRESS = TRUE, TARGETS_N_CORES = ncores)
 
 control_max_paralelo <- crew::crew_controller_local(
   "max_paralelo",
@@ -32,38 +35,51 @@ tar_source()
 iter <- data.frame(res = 7:9)
 
 list(
-  tar_target(years, c(2010, 2022)),
+  tar_target(
+    name = years,
+    command = c(2010, 2022)
+  ),
 
   # spatial manipulation
 
   tar_target(
-    census_tracts,
-    download_census_tracts(years),
+    name = census_tracts,
+    command = download_census_tracts(years),
     pattern = map(years),
     deployment = "main"
   ),
+
   tar_target(
-    census_statistical_grid,
-    download_statistical_grid(years),
+    name = census_statistical_grid,
+    command = download_statistical_grid(years),
     pattern = map(years),
     deployment = "main"
   ),
-  tar_target(urban_concentrations, download_urban_concentrations()),
-  tar_target(pop_arrangements, download_pop_arrangements()),
+
   tar_target(
-    pop_units,
-    merge_pop_units(urban_concentrations, pop_arrangements),
+    name = urban_concentrations,
+    command = download_urban_concentrations()
+  ),
+
+  tar_target(
+    name = pop_arrangements,
+    command = download_pop_arrangements()
+  ),
+
+  tar_target(
+    name = pop_units,
+    command = merge_pop_units(urban_concentrations, pop_arrangements),
     iteration = "group"
   ),
 
   tar_target(
-    pop_units_tracts,
-    subset_pop_units_tracts(census_tracts, pop_units),
+    name = pop_units_tracts,
+    command = subset_pop_units_tracts(census_tracts, pop_units),
     pattern = map(census_tracts)
   ),
   tar_target(
-    populated_stat_grids,
-    prepare_stat_grids(census_statistical_grid, pop_units_tracts),
+    name = populated_stat_grids,
+    command = prepare_stat_grids(census_statistical_grid, pop_units_tracts),
     pattern = map(census_statistical_grid, pop_units_tracts),
     deployment = "main"
   ),
@@ -71,23 +87,24 @@ list(
   # data processing
 
   tar_target(
-    census_data,
-    prepare_census_data(years),
+    name = census_data,
+    command = prepare_census_data(years),
     pattern = map(years)
   ),
   tar_target(
-    tracts_with_data,
-    merge_census_tracts_data(pop_units_tracts, census_data),
+    name = tracts_with_data,
+    command = merge_census_tracts_data(pop_units_tracts, census_data),
     pattern = map(pop_units_tracts, census_data)
   ),
   tar_target(
-    individual_tracts_with_data,
-    filter_tracts_with_data(years, tracts_with_data, pop_units),
+    name = individual_tracts_with_data,
+    command = filter_tracts_with_data(years, tracts_with_data, pop_units),
     pattern = cross(map(years, tracts_with_data), pop_units)
   ),
+
   tar_target(
-    individual_stat_grids,
-    filter_individual_stat_grids(
+    name = individual_stat_grids,
+    command = filter_individual_stat_grids(
       years,
       populated_stat_grids,
       pop_units,
@@ -102,8 +119,8 @@ list(
   # data interpolation
 
   tar_target(
-    stat_grids_with_data,
-    aggregate_data_to_stat_grid(
+    name = stat_grids_with_data,
+    command = aggregate_data_to_stat_grid(
       years,
       pop_units,
       individual_stat_grids,
@@ -125,14 +142,14 @@ list(
   tar_map(
     values = iter,
     tar_target(
-      hex_grids_res,
-      create_hex_grid(res, pop_units),
+      name = hex_grids_res,
+      command = create_hex_grid(res, pop_units),
       pattern = map(pop_units),
       format = "file"
     ),
     tar_target(
-      hexs_with_data_res,
-      aggregate_data_to_hexagons(
+      name = hexs_with_data_res,
+      command = aggregate_data_to_hexagons(
         years,
         pop_units,
         stat_grids_with_data,
